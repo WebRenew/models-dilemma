@@ -311,7 +311,7 @@ export function GameFeed({ userGames = [], onNewGame }: GameFeedProps) {
   }, [])
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto px-6">
+    <div ref={containerRef} className="h-full overflow-y-auto scrollbar-hide px-6">
       <AnimatePresence mode="popLayout">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">

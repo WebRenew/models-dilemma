@@ -313,7 +313,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   </div>
                 </div>
 
-                <div ref={roundsContainerRef} className="flex-1 overflow-y-auto space-y-2 mb-4">
+                <div ref={roundsContainerRef} className="flex-1 overflow-y-auto scrollbar-hide space-y-2 mb-4">
                   {rounds.map((round, idx) => {
                     const a1Won = round.agent1Points > round.agent2Points
                     const a2Won = round.agent2Points > round.agent1Points

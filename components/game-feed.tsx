@@ -172,7 +172,7 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             {formatModelName(match.modelAName)}
           </span>
         </div>
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap flex-1 min-w-0">
           {match.rounds.map((round) => {
             const winner = getRoundWinner(round.actionA, round.actionB)
             return (
@@ -195,7 +195,10 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             />
           ))}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-12 sm:w-14 text-right ml-auto tabular-nums">{match.scoreA}</span>
+        {/* Score wrapper - fixed width for alignment */}
+        <div className="shrink-0 w-8">
+          <span className="font-mono text-xs sm:text-sm text-white/80 block text-right tabular-nums">{match.scoreA}</span>
+        </div>
       </div>
 
       {/* Model B row */}
@@ -205,7 +208,7 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             {formatModelName(match.modelBName)}
           </span>
         </div>
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap flex-1 min-w-0">
           {match.rounds.map((round) => {
             const winner = getRoundWinner(round.actionA, round.actionB)
             return (
@@ -228,7 +231,10 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             />
           ))}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-12 sm:w-14 text-right ml-auto tabular-nums">{match.scoreB}</span>
+        {/* Score wrapper - fixed width for alignment */}
+        <div className="shrink-0 w-8">
+          <span className="font-mono text-xs sm:text-sm text-white/80 block text-right tabular-nums">{match.scoreB}</span>
+        </div>
       </div>
     </motion.div>
   )
@@ -260,16 +266,19 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
             {formatModelName(game.agent1DisplayName)}
           </span>
         </div>
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap flex-1 min-w-0">
           {game.rounds.map((round, i) => {
             const winner = getRoundWinner(round.agent1Decision, round.agent2Decision)
             return <DecisionDot key={i} decision={round.agent1Decision} isWinner={winner === "agent1"} />
           })}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-12 sm:w-14 text-right ml-auto tabular-nums">{game.agent1TotalScore}</span>
-        <span className="w-10 hidden sm:block">
-          <FramingIndicator framing={game.framing} scenario={game.scenario} />
-        </span>
+        {/* Score wrapper - fixed width for alignment */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-mono text-xs sm:text-sm text-white/80 w-8 text-right tabular-nums">{game.agent1TotalScore}</span>
+          <span className="w-12 hidden sm:flex justify-end">
+            <FramingIndicator framing={game.framing} scenario={game.scenario} />
+          </span>
+        </div>
       </div>
       {/* Agent 2 row */}
       <div className="flex items-center gap-2 sm:gap-4">
@@ -283,14 +292,17 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
             {formatModelName(game.agent2DisplayName)}
           </span>
         </div>
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap flex-1 min-w-0">
           {game.rounds.map((round, i) => {
             const winner = getRoundWinner(round.agent1Decision, round.agent2Decision)
             return <DecisionDot key={i} decision={round.agent2Decision} isWinner={winner === "agent2"} />
           })}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-12 sm:w-14 text-right ml-auto tabular-nums">{game.agent2TotalScore}</span>
-        <span className="w-8 hidden sm:block" />
+        {/* Score wrapper - fixed width for alignment */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-mono text-xs sm:text-sm text-white/80 w-8 text-right tabular-nums">{game.agent2TotalScore}</span>
+          <span className="w-12 hidden sm:block" />
+        </div>
       </div>
     </motion.div>
   )

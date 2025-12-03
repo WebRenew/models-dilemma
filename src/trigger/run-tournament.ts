@@ -4,9 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 const SCENARIOS = ["overt", "sales", "research", "creator"] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
-const GAMES_PER_BATCH = 100;
+// Timing configuration
+const DELAY_BETWEEN_GAMES_MS = 45_000; // 45 seconds between games
+const STREAMER_DURATION_HOURS = 4; // Run for 4 hours before next cron takes over
+const STREAMER_DURATION_MS = STREAMER_DURATION_HOURS * 60 * 60 * 1000;
 
-// Create Supabase client for checking running matches
+// Create Supabase client
 function getSupabaseClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -18,77 +21,158 @@ function getSupabaseClient() {
   return createClient(url, key);
 }
 
-// Check if there are any running matches
-async function hasRunningMatches(): Promise<boolean> {
+// Check if there's an active streamer running
+async function isStreamerActive(): Promise<boolean> {
   try {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
-      .from("matches")
-      .select("id")
-      .eq("status", "running")
-      .limit(1);
+      .from("streamer_state")
+      .select("*")
+      .eq("id", "singleton")
+      .single();
     
-    if (error) {
-      logger.warn("Error checking running matches", { error: error.message });
-      return false; // Assume no running matches if we can't check
+    if (error || !data) {
+      return false;
     }
     
-    return (data?.length || 0) > 0;
-  } catch (error) {
-    logger.warn("Error checking running matches", { error: String(error) });
+    // Check if streamer is active and not stale (started within last 4.5 hours)
+    const startedAt = new Date(data.started_at).getTime();
+    const now = Date.now();
+    const maxAge = 4.5 * 60 * 60 * 1000; // 4.5 hours
+    
+    return data.is_active && (now - startedAt) < maxAge;
+  } catch {
     return false;
   }
 }
 
-// Scheduled task that runs every 4 hours
-export const scheduledTournament = schedules.task({
-  id: "scheduled-tournament",
-  cron: "0 */4 * * *", // Every 4 hours
-  maxDuration: 7200, // 2 hours max
-  run: async () => {
-    logger.info("Scheduled tournament check started");
+// Set streamer state
+async function setStreamerState(isActive: boolean, runId?: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  
+  await supabase
+    .from("streamer_state")
+    .upsert({
+      id: "singleton",
+      is_active: isActive,
+      run_id: runId || null,
+      started_at: isActive ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    });
+}
 
-    // Check if previous games are still running
-    const running = await hasRunningMatches();
-    if (running) {
-      logger.info("Previous games still running, skipping this batch");
-      return {
-        skipped: true,
-        reason: "Previous games still running",
-      };
-    }
+// Get API base URL
+function getBaseUrl(): string | null {
+  return process.env.APP_URL 
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+    || (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : null);
+}
 
-    logger.info(`Starting batch of ${GAMES_PER_BATCH} games`);
-
-    // Get API base URL - APP_URL must be set in Trigger.dev environment variables
-    const baseUrl = process.env.APP_URL 
-      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
-      || (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : null);
-    
-    if (!baseUrl) {
-      logger.error("APP_URL environment variable not set in Trigger.dev");
-      return {
-        skipped: true,
-        reason: "APP_URL not configured - add your Vercel URL to Trigger.dev env vars",
-      };
-    }
-    
-    // Log the URL we're going to use for debugging
-    logger.info("API Configuration", { 
-      baseUrl,
-      fullUrl: `${baseUrl}/api/run-match`,
-      appUrlEnv: process.env.APP_URL ? "set" : "not set",
-      vercelUrlEnv: process.env.VERCEL_URL ? "set" : "not set",
+// Run a single game
+async function runSingleGame(baseUrl: string, scenario: Scenario): Promise<{
+  success: boolean;
+  matchId?: string;
+  modelA?: string;
+  modelB?: string;
+  scoreA?: number;
+  scoreB?: number;
+  error?: string;
+}> {
+  try {
+    const response = await fetch(`${baseUrl}/api/run-match`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        framing: scenario === "overt" ? "overt" : "cloaked",
+        scenario: scenario === "overt" ? undefined : scenario,
+        totalRounds: 10,
+        saveToDb: true,
+        streamRounds: false,
+      }),
     });
 
-    const results: {
-      success: boolean;
-      scenario: Scenario;
-      matchId?: string;
-      error?: string;
-    }[] = [];
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
 
-    // Track scenario distribution
+    const text = await response.text();
+    const lines = text.split("\n\n");
+    
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "complete") {
+            return {
+              success: true,
+              matchId: event.gameId,
+              modelA: event.modelAName,
+              modelB: event.modelBName,
+              scoreA: event.scoreA,
+              scoreB: event.scoreB,
+            };
+          }
+          if (event.type === "error") {
+            return {
+              success: false,
+              error: event.error || "Match error",
+            };
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    return { success: false, error: "No completion event received" };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// Continuous streamer - runs games with 45s delays for ~4 hours
+export const continuousStreamer = schedules.task({
+  id: "continuous-streamer",
+  cron: "0 */4 * * *", // Every 4 hours
+  maxDuration: 14400, // 4 hours max
+  run: async (payload) => {
+    const runId = payload.externalId || crypto.randomUUID();
+    
+    logger.info("Continuous streamer starting", { runId });
+
+    // Check if another streamer is already running
+    const alreadyActive = await isStreamerActive();
+    if (alreadyActive) {
+      logger.info("Another streamer is already active, skipping");
+      return {
+        skipped: true,
+        reason: "Another streamer is already running",
+      };
+    }
+
+    // Get API base URL
+    const baseUrl = getBaseUrl();
+    if (!baseUrl) {
+      logger.error("APP_URL not configured");
+      return {
+        skipped: true,
+        reason: "APP_URL not configured",
+      };
+    }
+
+    // Mark streamer as active
+    await setStreamerState(true, runId);
+    logger.info("Streamer activated", { baseUrl, runId });
+
+    const startTime = Date.now();
+    let gamesPlayed = 0;
+    let successful = 0;
+    let failed = 0;
+    
+    // Track scenario distribution for balanced play
     const scenarioCounts: Record<Scenario, number> = {
       overt: 0,
       sales: 0,
@@ -96,151 +180,97 @@ export const scheduledTournament = schedules.task({
       creator: 0,
     };
 
-    // Run 100 games with balanced scenarios (25 each)
-    const gamesPerScenario = Math.floor(GAMES_PER_BATCH / SCENARIOS.length);
+    try {
+      // Run games until duration expires
+      while (Date.now() - startTime < STREAMER_DURATION_MS) {
+        // Pick scenario with lowest count for balance
+        const scenario = SCENARIOS.reduce((min, s) => 
+          scenarioCounts[s] < scenarioCounts[min] ? s : min
+        , SCENARIOS[0]);
 
-    for (let i = 0; i < GAMES_PER_BATCH; i++) {
-      // Pick scenario with lowest count for balance
-      const scenario = SCENARIOS.reduce((min, s) => 
-        scenarioCounts[s] < scenarioCounts[min] ? s : min
-      , SCENARIOS[0]);
-
-      // Stop if all scenarios have enough games
-      if (scenarioCounts[scenario] >= gamesPerScenario) {
-        break;
-      }
-
-      logger.info(`Running game ${i + 1}/${GAMES_PER_BATCH}`, { scenario });
-
-      try {
-        const response = await fetch(`${baseUrl}/api/run-match`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            framing: scenario === "overt" ? "overt" : "cloaked",
-            scenario: scenario === "overt" ? undefined : scenario,
-            totalRounds: 10,
-            saveToDb: true,
-            streamRounds: false,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        // Parse SSE response to get result
-        const text = await response.text();
-        const lines = text.split("\n\n");
+        gamesPlayed++;
+        const elapsedMinutes = Math.round((Date.now() - startTime) / 60000);
         
-        let matchComplete = false;
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const event = JSON.parse(line.slice(6));
-              if (event.type === "complete") {
-                results.push({
-                  success: true,
-                  scenario,
-                  matchId: event.gameId,
-                });
-                scenarioCounts[scenario]++;
-                matchComplete = true;
-                
-                logger.info(`Game ${i + 1} complete`, {
-                  matchId: event.gameId,
-                  modelA: event.modelAName,
-                  modelB: event.modelBName,
-                  score: `${event.scoreA}-${event.scoreB}`,
-                });
-                break;
-              }
-            } catch {
-              // Ignore parse errors
-            }
-          }
+        logger.info(`Game ${gamesPlayed} starting`, { 
+          scenario, 
+          elapsedMinutes,
+          scenarioCounts,
+        });
+
+        const result = await runSingleGame(baseUrl, scenario);
+        scenarioCounts[scenario]++;
+
+        if (result.success) {
+          successful++;
+          logger.info(`Game ${gamesPlayed} complete`, {
+            matchId: result.matchId,
+            modelA: result.modelA,
+            modelB: result.modelB,
+            score: `${result.scoreA}-${result.scoreB}`,
+          });
+        } else {
+          failed++;
+          logger.warn(`Game ${gamesPlayed} failed`, { error: result.error });
         }
 
-        if (!matchComplete) {
-          throw new Error("No completion event received");
+        // Update state periodically
+        if (gamesPlayed % 10 === 0) {
+          await setStreamerState(true, runId);
         }
-      } catch (error) {
-        const errorDetails = error instanceof Error 
-          ? { message: error.message, name: error.name, cause: String(error.cause) }
-          : { raw: String(error) };
-        logger.error(`Game ${i + 1} failed`, { 
-          ...errorDetails,
-          scenario,
-          attemptedUrl: `${baseUrl}/api/run-match`,
-        });
-        results.push({
-          success: false,
-          scenario,
-          error: String(error),
-        });
-        // Still count it to avoid infinite loops
-        scenarioCounts[scenario]++;
+
+        // Wait 45 seconds before next game (unless we're out of time)
+        const remainingTime = STREAMER_DURATION_MS - (Date.now() - startTime);
+        if (remainingTime > DELAY_BETWEEN_GAMES_MS) {
+          logger.info(`Waiting 45s before next game...`);
+          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_GAMES_MS));
+        } else if (remainingTime > 0) {
+          // Not enough time for full delay, but enough for one more game
+          break;
+        }
       }
 
-      // Small delay between games to avoid overwhelming the API
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const totalMinutes = Math.round((Date.now() - startTime) / 60000);
+      
+      logger.info("Streamer session complete", {
+        gamesPlayed,
+        successful,
+        failed,
+        totalMinutes,
+        scenarioCounts,
+      });
+
+      return {
+        skipped: false,
+        gamesPlayed,
+        successful,
+        failed,
+        durationMinutes: totalMinutes,
+        scenarioCounts,
+      };
+    } finally {
+      // Always mark streamer as inactive when done
+      await setStreamerState(false);
+      logger.info("Streamer deactivated");
     }
-
-    const successful = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
-
-    logger.info("Batch complete", {
-      total: results.length,
-      successful,
-      failed,
-      scenarioCounts,
-    });
-
-    return {
-      skipped: false,
-      total: results.length,
-      successful,
-      failed,
-      scenarioCounts,
-    };
   },
 });
 
-// Manual trigger task (can be called on-demand)
+// Manual trigger for testing (runs fewer games)
 export const runTournamentTask = task({
   id: "run-tournament",
   maxDuration: 7200, // 2 hours
   retry: {
     maxAttempts: 1,
   },
-  run: async (payload: { games?: number; skipRunningCheck?: boolean }) => {
-    const gamesToRun = payload.games || GAMES_PER_BATCH;
+  run: async (payload: { games?: number; delayMs?: number }) => {
+    const gamesToRun = payload.games || 10;
+    const delayMs = payload.delayMs || DELAY_BETWEEN_GAMES_MS;
     
-    logger.info("Manual tournament started", { gamesToRun });
+    logger.info("Manual tournament started", { gamesToRun, delayMs });
 
-    // Check if previous games are still running (unless skipped)
-    if (!payload.skipRunningCheck) {
-      const running = await hasRunningMatches();
-      if (running) {
-        logger.info("Previous games still running, aborting");
-        return {
-          skipped: true,
-          reason: "Previous games still running",
-        };
-      }
-    }
-
-    // Get API base URL - APP_URL must be set in Trigger.dev environment variables
-    const baseUrl = process.env.APP_URL 
-      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
-      || (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : null);
-    
+    const baseUrl = getBaseUrl();
     if (!baseUrl) {
-      logger.error("APP_URL environment variable not set in Trigger.dev");
-      return {
-        skipped: true,
-        reason: "APP_URL not configured - add your Vercel URL to Trigger.dev env vars",
-      };
+      return { skipped: true, reason: "APP_URL not configured" };
     }
 
     const scenarioCounts: Record<Scenario, number> = {
@@ -252,61 +282,29 @@ export const runTournamentTask = task({
 
     let successful = 0;
     let failed = 0;
-    const gamesPerScenario = Math.floor(gamesToRun / SCENARIOS.length);
 
     for (let i = 0; i < gamesToRun; i++) {
       const scenario = SCENARIOS.reduce((min, s) => 
         scenarioCounts[s] < scenarioCounts[min] ? s : min
       , SCENARIOS[0]);
 
-      if (scenarioCounts[scenario] >= gamesPerScenario) {
-        break;
-      }
-
       logger.info(`Running game ${i + 1}/${gamesToRun}`, { scenario });
 
-      try {
-        const response = await fetch(`${baseUrl}/api/run-match`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            framing: scenario === "overt" ? "overt" : "cloaked",
-            scenario: scenario === "overt" ? undefined : scenario,
-            totalRounds: 10,
-            saveToDb: true,
-            streamRounds: false,
-          }),
-        });
+      const result = await runSingleGame(baseUrl, scenario);
+      scenarioCounts[scenario]++;
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const text = await response.text();
-        const lines = text.split("\n\n");
-        
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const event = JSON.parse(line.slice(6));
-              if (event.type === "complete") {
-                scenarioCounts[scenario]++;
-                successful++;
-                logger.info(`Game complete`, { matchId: event.gameId });
-                break;
-              }
-            } catch {
-              // Ignore
-            }
-          }
-        }
-      } catch (error) {
-        logger.error(`Game failed`, { error: String(error) });
-        scenarioCounts[scenario]++;
+      if (result.success) {
+        successful++;
+        logger.info(`Game ${i + 1} complete`, { matchId: result.matchId });
+      } else {
         failed++;
+        logger.warn(`Game ${i + 1} failed`, { error: result.error });
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait between games (except after last one)
+      if (i < gamesToRun - 1) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
     }
 
     logger.info("Tournament complete", { successful, failed, scenarioCounts });

@@ -115,6 +115,10 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
       setAgent2Thought({ text: "", isComplete: false })
 
       try {
+        // Calculate cumulative scores from previous rounds
+        const score1 = previousRounds.reduce((sum, r) => sum + r.agent1Points, 0)
+        const score2 = previousRounds.reduce((sum, r) => sum + r.agent2Points, 0)
+
         // Start both requests
         const [agent1Response, agent2Response] = await Promise.all([
           fetch("/api/agent-decision", {
@@ -127,6 +131,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
               totalRounds: TOTAL_ROUNDS,
               model: agent1Model,
               scenario,
+              myScore: score1,
+              oppScore: score2,
             }),
             signal,
           }),
@@ -140,6 +146,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
               totalRounds: TOTAL_ROUNDS,
               model: agent2Model,
               scenario,
+              myScore: score2,
+              oppScore: score1,
             }),
             signal,
           }),

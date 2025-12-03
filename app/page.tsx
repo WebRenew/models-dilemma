@@ -101,6 +101,14 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-black text-white">
+      {/* Status Banner */}
+      <div className="bg-amber-900/30 border-b border-amber-500/20 px-4 py-2">
+        <p className="text-center text-amber-200/80 text-xs sm:text-sm font-mono">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-2 animate-pulse" />
+          Monitoring issue with <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">deepseek/deepseek-v3.2-thinking</code> — temporarily removed from games, will re-enable when resolved
+        </p>
+      </div>
+
       <header className="relative top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6">
         <div className="font-mono text-xs sm:text-sm tracking-wider flex items-center gap-4">
           <span className="opacity-80">The Model&apos;s Dilemma</span>

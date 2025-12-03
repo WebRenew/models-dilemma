@@ -1,5 +1,7 @@
 "use client"
 
+import { AnimatedPercent } from "@/components/ui/animated-number"
+
 interface StrategyStatsProps {
   stats: {
     forgiving: number
@@ -13,11 +15,6 @@ interface StrategyStatsProps {
   }
 }
 
-function formatPercent(count: number, total: number): string {
-  if (total === 0) return "0%"
-  return `${Math.round((count / total) * 100)}%`
-}
-
 export function StrategyStats({ stats }: StrategyStatsProps) {
   return (
     <div className="border border-white/15 p-3 sm:p-5 w-full h-full">
@@ -25,19 +22,35 @@ export function StrategyStats({ stats }: StrategyStatsProps) {
       <div className="space-y-1.5 sm:space-y-2">
         <div>
           <p className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50">Forgiving</p>
-          <p className="font-mono text-xl sm:text-2xl text-white">{formatPercent(stats.forgiving, stats.forgivingTotal)}</p>
+          <AnimatedPercent 
+            value={stats.forgiving} 
+            total={stats.forgivingTotal} 
+            className="font-mono text-xl sm:text-2xl text-white block"
+          />
         </div>
         <div>
           <p className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50">Retaliating</p>
-          <p className="font-mono text-xl sm:text-2xl text-white">{formatPercent(stats.retaliating, stats.retaliatingTotal)}</p>
+          <AnimatedPercent 
+            value={stats.retaliating} 
+            total={stats.retaliatingTotal} 
+            className="font-mono text-xl sm:text-2xl text-white block"
+          />
         </div>
         <div>
           <p className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50">Nice</p>
-          <p className="font-mono text-xl sm:text-2xl text-white">{formatPercent(stats.nice, stats.niceTotal)}</p>
+          <AnimatedPercent 
+            value={stats.nice} 
+            total={stats.niceTotal} 
+            className="font-mono text-xl sm:text-2xl text-white block"
+          />
         </div>
         <div>
           <p className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50">Non-Envious</p>
-          <p className="font-mono text-xl sm:text-2xl text-white">{formatPercent(stats.nonEnvious, stats.nonEnviousTotal)}</p>
+          <AnimatedPercent 
+            value={stats.nonEnvious} 
+            total={stats.nonEnviousTotal} 
+            className="font-mono text-xl sm:text-2xl text-white block"
+          />
         </div>
       </div>
     </div>

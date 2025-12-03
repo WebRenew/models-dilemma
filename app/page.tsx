@@ -40,11 +40,14 @@ export default function Home() {
   })
 
   const loadStats = useCallback(async () => {
-    const stats = await fetchGameStats()
+    // Fetch all stats in parallel for faster loading
+    const [stats, rankings, strategies] = await Promise.all([
+      fetchGameStats(),
+      fetchModelRankings(10),
+      fetchStrategyStats(),
+    ])
     setDbStats(stats)
-    const rankings = await fetchModelRankings(10)
     setDbRankings(rankings)
-    const strategies = await fetchStrategyStats()
     setStrategyStats(strategies)
   }, [])
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { motion } from "motion/react"
+import { AnimatedNumber } from "@/components/ui/animated-number"
 
 interface RoundsCardProps {
   controlRounds: number
@@ -13,28 +13,20 @@ export function RoundsCard({ controlRounds, hiddenAgendaRounds }: RoundsCardProp
       {/* Control Group Rounds */}
       <div>
         <p className="font-mono text-[10px] uppercase tracking-wider text-white/50 mb-1">Control Group Rounds</p>
-        <motion.p
-          key={controlRounds}
-          initial={{ opacity: 0.5 }}
-          animate={{ opacity: 1 }}
-          className="font-mono text-2xl text-white"
-        >
-          {controlRounds.toLocaleString()}
-        </motion.p>
+        <AnimatedNumber 
+          value={controlRounds} 
+          className="font-mono text-2xl text-white block"
+        />
         <p className="font-mono text-[10px] text-white/50 mt-1">Original Prisoner&apos;s Dilemma</p>
       </div>
 
       {/* Hidden Agenda Rounds */}
       <div>
         <p className="font-mono text-[10px] uppercase tracking-wider text-white/50 mb-1">Hidden Agenda Rounds</p>
-        <motion.p
-          key={hiddenAgendaRounds}
-          initial={{ opacity: 0.5 }}
-          animate={{ opacity: 1 }}
-          className="font-mono text-2xl text-white"
-        >
-          {hiddenAgendaRounds.toLocaleString()}
-        </motion.p>
+        <AnimatedNumber 
+          value={hiddenAgendaRounds} 
+          className="font-mono text-2xl text-white block"
+        />
         <p className="font-mono text-[10px] text-white/50 mt-1">Hidden Prisoner&apos;s Agenda Prompt</p>
       </div>
     </div>

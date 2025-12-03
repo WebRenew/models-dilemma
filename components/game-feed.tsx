@@ -80,7 +80,7 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
     <motion.div
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col gap-2 py-4 border-l-2 border-emerald-500 pl-4 -ml-4 bg-emerald-500/5"
+      className="flex flex-col gap-2 py-4 border-l-2 border-emerald-500 pl-2 sm:pl-4 -ml-2 sm:-ml-4 bg-emerald-500/5"
     >
       {/* Status indicator */}
       <div className="flex items-center gap-2 mb-1">
@@ -92,17 +92,17 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
         <span className="text-emerald-400 font-mono text-[10px] uppercase tracking-wider">
           Live • Round {match.currentRound}/{match.totalRounds}
         </span>
+        <span className="font-mono text-[10px] text-white/40 ml-auto">{scenarioLabel}</span>
       </div>
 
       {/* Model A row */}
-      <div className="flex items-center gap-4">
-        <div className="w-12 shrink-0 text-right" />
-        <div className="w-72 shrink-0">
-          <span className="font-mono text-xs truncate block text-right text-white">
+      <div className="flex items-center gap-2 sm:gap-4">
+        <div className="w-24 sm:w-32 md:w-48 shrink-0">
+          <span className="font-mono text-[10px] sm:text-xs truncate block text-white">
             {formatModelName(match.modelAName)}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
           {match.rounds.map((round, i) => {
             const winner = getRoundWinner(round.actionA, round.actionB)
             return <DecisionDot key={i} decision={round.actionA} isWinner={winner === "agent1"} />
@@ -111,19 +111,17 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             <PendingDot key={`pending-${i}`} />
           ))}
         </div>
-        <span className="font-mono text-sm text-white/80 w-10 text-right ml-auto">{match.scoreA}</span>
-        <span className="font-mono text-[10px] text-white/40 w-8">{scenarioLabel}</span>
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreA}</span>
       </div>
 
       {/* Model B row */}
-      <div className="flex items-center gap-4">
-        <div className="w-12 shrink-0 text-right" />
-        <div className="w-72 shrink-0">
-          <span className="font-mono text-xs truncate block text-right text-white/60">
+      <div className="flex items-center gap-2 sm:gap-4">
+        <div className="w-24 sm:w-32 md:w-48 shrink-0">
+          <span className="font-mono text-[10px] sm:text-xs truncate block text-white/60">
             {formatModelName(match.modelBName)}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
           {match.rounds.map((round, i) => {
             const winner = getRoundWinner(round.actionA, round.actionB)
             return <DecisionDot key={i} decision={round.actionB} isWinner={winner === "agent2"} />
@@ -132,8 +130,7 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             <PendingDot key={`pending-${i}`} />
           ))}
         </div>
-        <span className="font-mono text-sm text-white/80 w-10 text-right ml-auto">{match.scoreB}</span>
-        <span className="w-8" />
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreB}</span>
       </div>
     </motion.div>
   )
@@ -150,49 +147,53 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
       transition={{ duration: 0.3 }}
       className="flex flex-col gap-2 py-4"
     >
+      {/* Header with framing indicator */}
+      <div className="flex items-center justify-between mb-1 sm:hidden">
+        <span className="font-mono text-[10px] text-white/40">{framingIndicator}</span>
+      </div>
       {/* Agent 1 row */}
-      <div className="flex items-center gap-4">
-        <div className="w-12 shrink-0 text-right">
-          {gameWinner === "agent1" && <span className="text-[#4ade80] text-xs font-mono">WIN</span>}
-          {gameWinner === "error" && <span className="text-[oklch(77.21%_.1991_64.28)] text-xs font-mono">ERR</span>}
+      <div className="flex items-center gap-2 sm:gap-4">
+        <div className="w-8 sm:w-12 shrink-0 text-right">
+          {gameWinner === "agent1" && <span className="text-[#4ade80] text-[10px] sm:text-xs font-mono">WIN</span>}
+          {gameWinner === "error" && <span className="text-[oklch(77.21%_.1991_64.28)] text-[10px] sm:text-xs font-mono">ERR</span>}
         </div>
-        <div className="w-72 shrink-0">
+        <div className="w-24 sm:w-32 md:w-48 shrink-0">
           <span
-            className={`font-mono text-xs truncate block text-right ${gameWinner === "agent1" ? "text-white" : "text-white/60"}`}
+            className={`font-mono text-[10px] sm:text-xs truncate block ${gameWinner === "agent1" ? "text-white" : "text-white/60"}`}
           >
             {formatModelName(game.agent1DisplayName)}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
           {game.rounds.map((round, i) => {
             const winner = getRoundWinner(round.agent1Decision, round.agent2Decision)
             return <DecisionDot key={i} decision={round.agent1Decision} isWinner={winner === "agent1"} />
           })}
         </div>
-        <span className="font-mono text-sm text-white/80 w-10 text-right ml-auto">{game.agent1TotalScore}</span>
-        <span className="font-mono text-[10px] text-white/40 w-8">{framingIndicator}</span>
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{game.agent1TotalScore}</span>
+        <span className="font-mono text-[10px] text-white/40 w-8 hidden sm:block">{framingIndicator}</span>
       </div>
       {/* Agent 2 row */}
-      <div className="flex items-center gap-4">
-        <div className="w-12 shrink-0 text-right">
-          {gameWinner === "agent2" && <span className="text-[#4ade80] text-xs font-mono">WIN</span>}
-          {gameWinner === "error" && <span className="text-[oklch(77.21%_.1991_64.28)] text-xs font-mono">ERR</span>}
+      <div className="flex items-center gap-2 sm:gap-4">
+        <div className="w-8 sm:w-12 shrink-0 text-right">
+          {gameWinner === "agent2" && <span className="text-[#4ade80] text-[10px] sm:text-xs font-mono">WIN</span>}
+          {gameWinner === "error" && <span className="text-[oklch(77.21%_.1991_64.28)] text-[10px] sm:text-xs font-mono">ERR</span>}
         </div>
-        <div className="w-72 shrink-0">
+        <div className="w-24 sm:w-32 md:w-48 shrink-0">
           <span
-            className={`font-mono text-xs truncate block text-right ${gameWinner === "agent2" ? "text-white" : "text-white/60"}`}
+            className={`font-mono text-[10px] sm:text-xs truncate block ${gameWinner === "agent2" ? "text-white" : "text-white/60"}`}
           >
             {formatModelName(game.agent2DisplayName)}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
           {game.rounds.map((round, i) => {
             const winner = getRoundWinner(round.agent1Decision, round.agent2Decision)
             return <DecisionDot key={i} decision={round.agent2Decision} isWinner={winner === "agent2"} />
           })}
         </div>
-        <span className="font-mono text-sm text-white/80 w-10 text-right ml-auto">{game.agent2TotalScore}</span>
-        <span className="w-8" />
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{game.agent2TotalScore}</span>
+        <span className="w-8 hidden sm:block" />
       </div>
     </motion.div>
   )
@@ -317,7 +318,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
   }, [])
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto scrollbar-hide px-6">
+    <div ref={containerRef} className="h-full overflow-y-auto scrollbar-hide px-2 sm:px-4 lg:px-6">
       <AnimatePresence mode="popLayout">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">

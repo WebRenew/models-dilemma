@@ -101,47 +101,47 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <header className="relative top-0 left-0 right-0 z-40 flex items-center justify-between px-8 py-6">
-        <div className="font-mono text-sm tracking-wider flex items-center gap-4">
+      <header className="relative top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6">
+        <div className="font-mono text-xs sm:text-sm tracking-wider flex items-center gap-4">
           <span className="opacity-80">The Model&apos;s Dilemma</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
           <Link
             href="/model-explorer"
-            className="font-mono text-xs uppercase tracking-wider text-white/50 hover:text-white/80 transition-colors"
+            className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50 hover:text-white/80 transition-colors"
           >
             Model Explorer
           </Link>
           {liveMatchCount > 0 && (
-            <span className="font-mono text-xs text-emerald-400 flex items-center gap-2">
+            <span className="font-mono text-[10px] sm:text-xs text-emerald-400 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              {liveMatchCount} Live {liveMatchCount === 1 ? "Match" : "Matches"}
+              {liveMatchCount} Live
             </span>
           )}
         </div>
       </header>
 
-      <div className="flex min-h-screen">
-        <div className="w-[60%] flex flex-col justify-center px-12 lg:px-16 xl:px-20 pb-12 overflow-visible z-10">
+      <div className="flex flex-col lg:flex-row min-h-screen">
+        <div className="w-full lg:w-[60%] flex flex-col justify-center px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:pb-12 overflow-visible z-10">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-            <h1 className="font-mono text-4xl lg:text-5xl xl:text-6xl text-white leading-tight mb-6 text-balance">
+            <h1 className="font-mono text-3xl sm:text-4xl lg:text-5xl xl:text-6xl text-white leading-tight mb-4 sm:mb-6 text-balance">
               The Model&apos;s Dilemma
             </h1>
-            <p className="text-white/80 max-w-lg mb-8 leading-relaxed">
+            <p className="text-white/80 max-w-lg mb-6 sm:mb-8 leading-relaxed text-sm sm:text-base">
               A recreation of Robert Axelrod&apos;s 1984 experiment on Game Theory&apos;s classic thought experiment the
               Prisoner&apos;s Dilemma.
             </p>
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <Button
                 onClick={() => setWhitepaperOpen(true)}
                 variant="outline"
-                className="font-mono text-sm uppercase tracking-wider border-white/15 bg-transparent text-white hover:bg-white/5 px-6 py-5"
+                className="font-mono text-xs sm:text-sm uppercase tracking-wider border-white/15 bg-transparent text-white hover:bg-white/5 px-4 sm:px-6 py-4 sm:py-5"
               >
                 Experiment Design
               </Button>
               <Button
                 onClick={() => setPlayGameOpen(true)}
-                className="font-mono text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 px-6 py-5"
+                className="font-mono text-xs sm:text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 px-4 sm:px-6 py-4 sm:py-5"
               >
                 Play Game
               </Button>
@@ -152,7 +152,7 @@ export default function Home() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            className="grid grid-cols-4 gap-2 mt-16 overflow-visible"
+            className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-8 sm:mt-12 lg:mt-16 overflow-visible"
           >
             <div className="col-span-2 flex">
               <RankingsCard rankings={rankings} onExport={exportDataset} />
@@ -168,7 +168,7 @@ export default function Home() {
           </motion.div>
         </div>
 
-        <div className="w-[40%] h-screen pb-8 pr-8 z-0">
+        <div className="w-full lg:w-[40%] h-[50vh] lg:h-screen pb-4 lg:pb-8 px-4 lg:px-0 lg:pr-8 z-0">
           <GameFeed userGames={userGames} onNewGame={handleNewGame} onLiveMatchCountChange={handleLiveMatchUpdate} />
         </div>
       </div>

@@ -175,30 +175,30 @@ export default function ModelExplorerPage() {
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Header */}
-      <header className="border-b border-white/10 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="font-mono text-lg hover:text-white/70 transition-colors">
+      <header className="border-b border-white/10 px-4 sm:px-6 py-4">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-6 flex-wrap">
+            <Link href="/" className="font-mono text-sm sm:text-lg hover:text-white/70 transition-colors">
               The Model&apos;s Dilemma
             </Link>
-            <span className="text-white/30">/</span>
-            <span className="font-mono text-white/70">Model Explorer</span>
+            <span className="text-white/30 hidden sm:inline">/</span>
+            <span className="font-mono text-xs sm:text-base text-white/70">Model Explorer</span>
           </div>
-          <Link href="/" className="font-mono text-sm text-white/50 hover:text-white transition-colors">
+          <Link href="/" className="font-mono text-xs sm:text-sm text-white/50 hover:text-white transition-colors">
             Back to Dashboard
           </Link>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-12">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8 sm:space-y-12">
         {/* Color Key */}
         <section>
-          <h2 className="font-mono text-xl mb-4">Model Color Key</h2>
-          <div className="flex flex-wrap gap-4">
+          <h2 className="font-mono text-lg sm:text-xl mb-4">Model Color Key</h2>
+          <div className="flex flex-wrap gap-2 sm:gap-4">
             {models.map((m) => (
               <div key={m.modelId} className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded" style={{ backgroundColor: getModelColor(m.modelId) }} />
-                <span className="font-mono text-sm text-white/70">{formatModelName(m.modelId)}</span>
+                <div className="w-3 h-3 sm:w-4 sm:h-4 rounded" style={{ backgroundColor: getModelColor(m.modelId) }} />
+                <span className="font-mono text-xs sm:text-sm text-white/70">{formatModelName(m.modelId)}</span>
               </div>
             ))}
           </div>
@@ -206,88 +206,94 @@ export default function ModelExplorerPage() {
 
         {/* Agent Behavior */}
         <section>
-          <h2 className="font-mono text-xl mb-2">Agent Behavior</h2>
-          <p className="text-white/50 text-sm mb-4">Cooperation vs Defection rates across all games</p>
-          <div className="bg-white/5 rounded-lg p-6 border border-white/10">
+          <h2 className="font-mono text-lg sm:text-xl mb-2">Agent Behavior</h2>
+          <p className="text-white/50 text-xs sm:text-sm mb-4">Cooperation vs Defection rates across all games</p>
+          <div className="bg-white/5 rounded-lg p-3 sm:p-6 border border-white/10 overflow-x-auto">
             <Tabs
               defaultValue="all"
               className="w-full"
               onValueChange={(v) => setBehaviorFilter(v as "all" | "overt" | "cloaked")}
             >
-              <TabsList className="mb-6 bg-white/5">
-                <TabsTrigger value="all" className="font-mono data-[state=active]:bg-white/10">
-                  All Games
+              <TabsList className="mb-4 sm:mb-6 bg-white/5 flex-wrap">
+                <TabsTrigger value="all" className="font-mono text-xs sm:text-sm data-[state=active]:bg-white/10">
+                  All
                 </TabsTrigger>
-                <TabsTrigger value="overt" className="font-mono data-[state=active]:bg-green-500/20">
-                  Overt (Control)
+                <TabsTrigger value="overt" className="font-mono text-xs sm:text-sm data-[state=active]:bg-green-500/20">
+                  Overt
                 </TabsTrigger>
-                <TabsTrigger value="cloaked" className="font-mono data-[state=active]:bg-purple-500/20">
+                <TabsTrigger value="cloaked" className="font-mono text-xs sm:text-sm data-[state=active]:bg-purple-500/20">
                   Cloaked
                 </TabsTrigger>
               </TabsList>
 
               <TabsContent value="all" className="mt-0">
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={behaviorData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={180}
-                      stroke="rgba(255,255,255,0.5)"
-                      tick={{ fontSize: 12, fontFamily: "monospace" }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                    <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
-                    <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="min-w-[400px]">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={behaviorData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                      <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        width={120}
+                        stroke="rgba(255,255,255,0.5)"
+                        tick={{ fontSize: 10, fontFamily: "monospace" }}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
+                      <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </TabsContent>
 
               <TabsContent value="overt" className="mt-0">
                 <p className="text-white/40 text-xs mb-4 font-mono">Explicit Prisoner&apos;s Dilemma framing</p>
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={behaviorData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={180}
-                      stroke="rgba(255,255,255,0.5)"
-                      tick={{ fontSize: 12, fontFamily: "monospace" }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                    <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
-                    <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="min-w-[400px]">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={behaviorData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                      <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        width={120}
+                        stroke="rgba(255,255,255,0.5)"
+                        tick={{ fontSize: 10, fontFamily: "monospace" }}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
+                      <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </TabsContent>
 
               <TabsContent value="cloaked" className="mt-0">
                 <p className="text-white/40 text-xs mb-4 font-mono">
-                  All cloaked scenarios combined (Sales + Research + Creator)
+                  All cloaked scenarios combined
                 </p>
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={behaviorData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={180}
-                      stroke="rgba(255,255,255,0.5)"
-                      tick={{ fontSize: 12, fontFamily: "monospace" }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                    <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
-                    <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="min-w-[400px]">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={behaviorData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                      <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        width={120}
+                        stroke="rgba(255,255,255,0.5)"
+                        tick={{ fontSize: 10, fontFamily: "monospace" }}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
+                      <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </TabsContent>
             </Tabs>
           </div>
@@ -295,133 +301,141 @@ export default function ModelExplorerPage() {
 
         {/* Wins vs Losses */}
         <section>
-          <h2 className="font-mono text-xl mb-2">Wins vs Losses</h2>
-          <p className="text-white/50 text-sm mb-4">Game outcomes by model</p>
-          <div className="bg-white/5 rounded-lg p-6 border border-white/10">
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={winsLossesData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  width={180}
-                  stroke="rgba(255,255,255,0.5)"
-                  tick={{ fontSize: 12, fontFamily: "monospace" }}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend />
-                <Bar dataKey="wins" name="Wins" fill="oklch(64.58% .199 147.27)" />
-                <Bar dataKey="losses" name="Losses" fill="oklch(62.56% .2234 23.03)" />
-                <Bar dataKey="ties" name="Ties" fill="oklch(81.87% .1969 76.46)" />
-              </BarChart>
-            </ResponsiveContainer>
+          <h2 className="font-mono text-lg sm:text-xl mb-2">Wins vs Losses</h2>
+          <p className="text-white/50 text-xs sm:text-sm mb-4">Game outcomes by model</p>
+          <div className="bg-white/5 rounded-lg p-3 sm:p-6 border border-white/10 overflow-x-auto">
+            <div className="min-w-[400px]">
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={winsLossesData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                  <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                  <YAxis
+                    dataKey="name"
+                    type="category"
+                    width={120}
+                    stroke="rgba(255,255,255,0.5)"
+                    tick={{ fontSize: 10, fontFamily: "monospace" }}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="wins" name="Wins" fill="oklch(64.58% .199 147.27)" />
+                  <Bar dataKey="losses" name="Losses" fill="oklch(62.56% .2234 23.03)" />
+                  <Bar dataKey="ties" name="Ties" fill="oklch(81.87% .1969 76.46)" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </section>
 
         {/* Cloaked Scenario Results */}
         <section>
-          <h2 className="font-mono text-xl mb-2">Cloaked Scenario Results</h2>
-          <p className="text-white/50 text-sm mb-4">Cooperation rates across different scenario framings</p>
-          <div className="bg-white/5 rounded-lg p-6 border border-white/10">
+          <h2 className="font-mono text-lg sm:text-xl mb-2">Cloaked Scenario Results</h2>
+          <p className="text-white/50 text-xs sm:text-sm mb-4">Cooperation rates across different scenario framings</p>
+          <div className="bg-white/5 rounded-lg p-3 sm:p-6 border border-white/10 overflow-x-auto">
             <Tabs defaultValue="sales" className="w-full">
-              <TabsList className="mb-6 bg-white/5">
-                <TabsTrigger value="sales" className="font-mono data-[state=active]:bg-purple-500/20">
-                  Sales Territory
+              <TabsList className="mb-4 sm:mb-6 bg-white/5 flex-wrap">
+                <TabsTrigger value="sales" className="font-mono text-xs sm:text-sm data-[state=active]:bg-purple-500/20">
+                  Sales
                 </TabsTrigger>
-                <TabsTrigger value="research" className="font-mono data-[state=active]:bg-blue-500/20">
-                  Research Lab
+                <TabsTrigger value="research" className="font-mono text-xs sm:text-sm data-[state=active]:bg-blue-500/20">
+                  Research
                 </TabsTrigger>
-                <TabsTrigger value="creator" className="font-mono data-[state=active]:bg-pink-500/20">
-                  Content Creator
+                <TabsTrigger value="creator" className="font-mono text-xs sm:text-sm data-[state=active]:bg-pink-500/20">
+                  Creator
                 </TabsTrigger>
               </TabsList>
 
               <TabsContent value="sales">
-                <p className="text-white/40 text-xs mb-4 font-mono">SHARE (cooperate) vs HOLD (defect)</p>
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={salesData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={180}
-                      stroke="rgba(255,255,255,0.5)"
-                      tick={{ fontSize: 12, fontFamily: "monospace" }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                    <Bar dataKey="share" name="SHARE" fill="#a855f7">
-                      {salesData.map((entry, index) => (
-                        <Cell key={`cell-share-${index}`} fill={getModelColor(entry.modelId)} />
-                      ))}
-                    </Bar>
-                    <Bar dataKey="hold" name="HOLD" fill="#7c3aed">
-                      {salesData.map((entry, index) => (
-                        <Cell key={`cell-hold-${index}`} fill={getModelColor(entry.modelId)} fillOpacity={0.7} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <p className="text-white/40 text-xs mb-4 font-mono">SHARE vs HOLD</p>
+                <div className="min-w-[400px]">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={salesData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                      <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        width={120}
+                        stroke="rgba(255,255,255,0.5)"
+                        tick={{ fontSize: 10, fontFamily: "monospace" }}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="share" name="SHARE" fill="#a855f7">
+                        {salesData.map((entry, index) => (
+                          <Cell key={`cell-share-${index}`} fill={getModelColor(entry.modelId)} />
+                        ))}
+                      </Bar>
+                      <Bar dataKey="hold" name="HOLD" fill="#7c3aed">
+                        {salesData.map((entry, index) => (
+                          <Cell key={`cell-hold-${index}`} fill={getModelColor(entry.modelId)} fillOpacity={0.7} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </TabsContent>
 
               <TabsContent value="research">
-                <p className="text-white/40 text-xs mb-4 font-mono">OPEN (cooperate) vs GUARDED (defect)</p>
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={researchData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={180}
-                      stroke="rgba(255,255,255,0.5)"
-                      tick={{ fontSize: 12, fontFamily: "monospace" }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                    <Bar dataKey="open" name="OPEN" fill="#60a5fa">
-                      {researchData.map((entry, index) => (
-                        <Cell key={`cell-open-${index}`} fill={getModelColor(entry.modelId)} />
-                      ))}
-                    </Bar>
-                    <Bar dataKey="guarded" name="GUARDED" fill="#3b82f6">
-                      {researchData.map((entry, index) => (
-                        <Cell key={`cell-guarded-${index}`} fill={getModelColor(entry.modelId)} fillOpacity={0.7} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <p className="text-white/40 text-xs mb-4 font-mono">OPEN vs GUARDED</p>
+                <div className="min-w-[400px]">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={researchData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                      <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        width={120}
+                        stroke="rgba(255,255,255,0.5)"
+                        tick={{ fontSize: 10, fontFamily: "monospace" }}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="open" name="OPEN" fill="#60a5fa">
+                        {researchData.map((entry, index) => (
+                          <Cell key={`cell-open-${index}`} fill={getModelColor(entry.modelId)} />
+                        ))}
+                      </Bar>
+                      <Bar dataKey="guarded" name="GUARDED" fill="#3b82f6">
+                        {researchData.map((entry, index) => (
+                          <Cell key={`cell-guarded-${index}`} fill={getModelColor(entry.modelId)} fillOpacity={0.7} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </TabsContent>
 
               <TabsContent value="creator">
-                <p className="text-white/40 text-xs mb-4 font-mono">SUPPORT (cooperate) vs INDEPENDENT (defect)</p>
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={creatorData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={180}
-                      stroke="rgba(255,255,255,0.5)"
-                      tick={{ fontSize: 12, fontFamily: "monospace" }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                    <Bar dataKey="support" name="SUPPORT" fill="#f472b6">
-                      {creatorData.map((entry, index) => (
-                        <Cell key={`cell-support-${index}`} fill={getModelColor(entry.modelId)} />
-                      ))}
-                    </Bar>
-                    <Bar dataKey="independent" name="INDEPENDENT" fill="#ec4899">
-                      {creatorData.map((entry, index) => (
-                        <Cell key={`cell-independent-${index}`} fill={getModelColor(entry.modelId)} fillOpacity={0.7} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <p className="text-white/40 text-xs mb-4 font-mono">SUPPORT vs INDEPENDENT</p>
+                <div className="min-w-[400px]">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={creatorData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                      <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        width={120}
+                        stroke="rgba(255,255,255,0.5)"
+                        tick={{ fontSize: 10, fontFamily: "monospace" }}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="support" name="SUPPORT" fill="#f472b6">
+                        {creatorData.map((entry, index) => (
+                          <Cell key={`cell-support-${index}`} fill={getModelColor(entry.modelId)} />
+                        ))}
+                      </Bar>
+                      <Bar dataKey="independent" name="INDEPENDENT" fill="#ec4899">
+                        {creatorData.map((entry, index) => (
+                          <Cell key={`cell-independent-${index}`} fill={getModelColor(entry.modelId)} fillOpacity={0.7} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </TabsContent>
             </Tabs>
           </div>
@@ -429,59 +443,63 @@ export default function ModelExplorerPage() {
 
         {/* Model Errors */}
         <section>
-          <h2 className="font-mono text-xl mb-2">Model Errors</h2>
-          <p className="text-white/50 text-sm mb-4">Failed responses and format violations by model</p>
-          <div className="bg-white/5 rounded-lg p-6 border border-white/10">
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={errorsData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  width={180}
-                  stroke="rgba(255,255,255,0.5)"
-                  tick={{ fontSize: 12, fontFamily: "monospace" }}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend />
-                <Bar dataKey="errors" name="Errors" fill="oklch(77.21% .1991 64.28)">
-                  {errorsData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={getModelColor(entry.modelId)} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <h2 className="font-mono text-lg sm:text-xl mb-2">Model Errors</h2>
+          <p className="text-white/50 text-xs sm:text-sm mb-4">Failed responses and format violations by model</p>
+          <div className="bg-white/5 rounded-lg p-3 sm:p-6 border border-white/10 overflow-x-auto">
+            <div className="min-w-[400px]">
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={errorsData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                  <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                  <YAxis
+                    dataKey="name"
+                    type="category"
+                    width={120}
+                    stroke="rgba(255,255,255,0.5)"
+                    tick={{ fontSize: 10, fontFamily: "monospace" }}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="errors" name="Errors" fill="oklch(77.21% .1991 64.28)">
+                    {errorsData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={getModelColor(entry.modelId)} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </section>
 
         {/* Tokens Consumed vs Games Played */}
         <section>
-          <h2 className="font-mono text-xl mb-2">Reasoning Effort</h2>
-          <p className="text-white/50 text-sm mb-4">
-            Total tokens consumed vs games played (higher tokens may indicate deeper reasoning)
+          <h2 className="font-mono text-lg sm:text-xl mb-2">Reasoning Effort</h2>
+          <p className="text-white/50 text-xs sm:text-sm mb-4">
+            Tokens consumed per game (higher may indicate deeper reasoning)
           </p>
-          <div className="bg-white/5 rounded-lg p-6 border border-white/10">
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={tokensData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                <XAxis type="number" stroke="rgba(255,255,255,0.5)" />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  width={180}
-                  stroke="rgba(255,255,255,0.5)"
-                  tick={{ fontSize: 12, fontFamily: "monospace" }}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend />
-                <Bar dataKey="tokensPerGame" name="Tokens per Game" fill="oklch(57.61% .2321 258.23)">
-                  {tokensData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={getModelColor(entry.modelId)} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="bg-white/5 rounded-lg p-3 sm:p-6 border border-white/10 overflow-x-auto">
+            <div className="min-w-[400px]">
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={tokensData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                  <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
+                  <YAxis
+                    dataKey="name"
+                    type="category"
+                    width={120}
+                    stroke="rgba(255,255,255,0.5)"
+                    tick={{ fontSize: 10, fontFamily: "monospace" }}
+                  />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="tokensPerGame" name="Tokens/Game" fill="oklch(57.61% .2321 258.23)">
+                    {tokensData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={getModelColor(entry.modelId)} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </section>
       </main>

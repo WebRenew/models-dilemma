@@ -391,7 +391,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   <div>
                     <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Model A</Label>
                     <Select value={agent1Model} onValueChange={setAgent1Model}>
-                      <SelectTrigger className="mt-2 font-mono text-sm bg-transparent border-white/15 text-white">
+                      <SelectTrigger className="mt-2 w-full font-mono text-sm bg-transparent border-white/15 text-white">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-black border-white/15 max-h-64">
@@ -412,7 +412,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   <div>
                     <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Model B</Label>
                     <Select value={agent2Model} onValueChange={setAgent2Model}>
-                      <SelectTrigger className="mt-2 font-mono text-sm bg-transparent border-white/15 text-white">
+                      <SelectTrigger className="mt-2 w-full font-mono text-sm bg-transparent border-white/15 text-white">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-black border-white/15 max-h-64">

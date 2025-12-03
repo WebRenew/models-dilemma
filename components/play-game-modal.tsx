@@ -219,7 +219,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     const signal = abortControllerRef.current.signal
 
     // Generate game ID and timestamp at start so rounds can be saved live
-    const gameId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const gameId = crypto.randomUUID()
     const gameTimestamp = new Date().toISOString()
     const agent1DisplayName = getShortModelName(agent1Model)
     const agent2DisplayName = getShortModelName(agent2Model)

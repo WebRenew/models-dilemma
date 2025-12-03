@@ -26,7 +26,7 @@ export default function Home() {
 
   const [dbStats, setDbStats] = useState({ totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 })
   const [dbRankings, setDbRankings] = useState<
-    { modelId: string; displayName: string; totalPoints: number; gamesPlayed: number }[]
+    { modelId: string; displayName: string; totalPoints: number; gamesPlayed: number; wins: number; losses: number }[]
   >([])
   const [strategyStats, setStrategyStats] = useState({
     forgiving: 0,

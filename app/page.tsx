@@ -105,14 +105,14 @@ export default function Home() {
     <div className="min-h-screen bg-black text-white">
       {/* Status Banner */}
       {showBanner && (
-        <div className="bg-amber-900/30 border-b border-amber-500/20 px-4 py-2 relative">
-          <p className="text-center text-amber-200/80 text-xs sm:text-sm font-mono pr-8">
-            <span className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-2 animate-pulse" />
-            Monitoring issue with provider <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">deepseek</code> — temporarily removed from games
+        <div className="bg-[#2a1700] border-b border-[#ff9300]/20 px-4 py-2 relative">
+          <p className="text-center text-[#ff9300] text-xs sm:text-sm font-mono pr-8">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#ff9300] mr-2 animate-pulse" />
+            Monitoring issue with provider <code className="bg-[#ff9300]/20 px-1.5 py-0.5 rounded">deepseek</code> — temporarily removed from games
           </p>
           <button
             onClick={() => setShowBanner(false)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-200/60 hover:text-amber-200 transition-colors p-1"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[#ff9300]/60 hover:text-[#ff9300] transition-colors p-1"
             aria-label="Dismiss banner"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

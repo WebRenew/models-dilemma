@@ -100,16 +100,21 @@ If behavior diverges significantly → evidence for sophisticated pattern matchi
 
 ## Running Locally
 
-\`\`\`bash
-# Install dependencies
+```bash
 pnpm install
-
-# Set environment variables
-# SUPABASE_URL, SUPABASE_ANON_KEY, AI_GATEWAY_API_KEY
-
-# Run development server
 pnpm dev
-\`\`\`
+```
+
+### Environment Variables
+
+Create a `.env.local` file with:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+AI_GATEWAY_API_KEY=your_ai_gateway_key
+```
 
 ## Links
 

@@ -16,11 +16,20 @@ export const metadata: Metadata = {
     title: "The Model's Dilemma",
     description: "A recreation of Robert Axelrod's 1984 experiment on the Prisoner's Dilemma with AI models.",
     type: 'website',
+    images: [
+      {
+        url: '/og.png',
+        width: 1200,
+        height: 630,
+        alt: "The Model's Dilemma - AI Prisoner's Dilemma Tournament",
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: "The Model's Dilemma",
     description: "A recreation of Robert Axelrod's 1984 experiment on the Prisoner's Dilemma with AI models.",
+    images: ['/og.png'],
   },
 }
 

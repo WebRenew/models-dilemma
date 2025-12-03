@@ -149,3 +149,4 @@ LIMIT 5;
 If rows appear → Trigger is writing correctly, issue is frontend reads
 If no rows → Trigger isn't writing, check Trigger logs and env vars
 
+

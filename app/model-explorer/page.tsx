@@ -143,10 +143,10 @@ export default function ModelExplorerPage() {
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-black/90 border border-white/20 p-3 rounded-lg">
-          <p className="font-mono text-sm text-white mb-2">{label}</p>
+        <div className="bg-black/95 border border-white/10 p-3 rounded-lg shadow-xl">
+          <p className="font-mono text-sm text-white/70 mb-2">{label}</p>
           {payload.map((entry: any, index: number) => (
-            <p key={index} className="text-xs" style={{ color: entry.color }}>
+            <p key={index} className="text-xs opacity-90" style={{ color: entry.color }}>
               {entry.name}: {entry.value.toLocaleString()}
             </p>
           ))}

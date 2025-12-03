@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AI_MODELS, DEFAULT_MODEL } from "@/lib/models"
-import { X, Loader2, Zap, Brain } from "lucide-react"
+import { X, Loader2, Zap, Brain, ChevronDown, ChevronUp, Info } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
-import { type RoundResult, type GameRecord, calculatePayoff, getShortModelName } from "@/lib/game-logic"
+import { type RoundResult, type GameRecord, getShortModelName } from "@/lib/game-logic"
+import { createClient } from "@/lib/supabase/client"
 
 interface PlayGameModalProps {
   isOpen: boolean
@@ -16,6 +17,7 @@ interface PlayGameModalProps {
 }
 
 type Scenario = "overt" | "sales" | "research" | "creator"
+type Decision = "cooperate" | "defect" | "error"
 
 const SCENARIOS: { id: Scenario; name: string; badge: string; description: string; actions: [string, string] }[] = [
   {
@@ -50,6 +52,29 @@ const SCENARIOS: { id: Scenario; name: string; badge: string; description: strin
 
 const TOTAL_ROUNDS = 10
 
+interface GameRoundRow {
+  id: string
+  game_id: string
+  round_number: number
+  total_rounds: number
+  agent1_model_id: string
+  agent1_display_name: string
+  agent1_decision: Decision
+  agent1_reasoning: string | null
+  agent1_round_points: number
+  agent1_cumulative_score: number
+  agent2_model_id: string
+  agent2_display_name: string
+  agent2_decision: Decision
+  agent2_reasoning: string | null
+  agent2_round_points: number
+  agent2_cumulative_score: number
+  is_final_round: boolean
+  game_winner: "agent1" | "agent2" | "tie" | null
+  prompt_a: string | null
+  prompt_b: string | null
+}
+
 interface StreamingThought {
   text: string
   isComplete: boolean
@@ -67,7 +92,15 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
   const [isProcessing, setIsProcessing] = useState(false)
   const [agent1Thought, setAgent1Thought] = useState<StreamingThought>({ text: "", isComplete: false })
   const [agent2Thought, setAgent2Thought] = useState<StreamingThought>({ text: "", isComplete: false })
-  const abortControllerRef = useRef<AbortController | null>(null)
+  const [agent1Prompt, setAgent1Prompt] = useState<string | null>(null)
+  const [agent2Prompt, setAgent2Prompt] = useState<string | null>(null)
+  const [showAgent1Prompt, setShowAgent1Prompt] = useState(false)
+  const [showAgent2Prompt, setShowAgent2Prompt] = useState(false)
+  const [gameId, setGameId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  
+  const supabaseRef = useRef(createClient())
+  const channelRef = useRef<ReturnType<typeof supabaseRef.current.channel> | null>(null)
 
   const groupedModels = AI_MODELS.reduce(
     (acc, model) => {
@@ -79,6 +112,12 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
   )
 
   const resetGame = useCallback(() => {
+    // Clean up Supabase channel
+    if (channelRef.current) {
+      supabaseRef.current.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+    
     setGameState("setup")
     setCurrentRound(0)
     setRounds([])
@@ -87,126 +126,141 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     setIsProcessing(false)
     setAgent1Thought({ text: "", isComplete: false })
     setAgent2Thought({ text: "", isComplete: false })
-    abortControllerRef.current?.abort()
+    setAgent1Prompt(null)
+    setAgent2Prompt(null)
+    setShowAgent1Prompt(false)
+    setShowAgent2Prompt(false)
+    setGameId(null)
+    setError(null)
   }, [])
 
-  const formatHistory = (previousRounds: RoundResult[], agentNumber: 1 | 2): string => {
-    if (previousRounds.length === 0) return "No previous rounds."
+  // Subscribe to game rounds via Supabase Realtime
+  useEffect(() => {
+    if (!gameId || gameState !== "playing") return
+
+    console.log("[PlayGame] Setting up Realtime subscription for game:", gameId)
     
-    const scenarioConfig = SCENARIOS.find(s => s.id === scenario)
-    const [coopAction, defectAction] = scenarioConfig?.actions || ["COOPERATE", "DEFECT"]
-    
-    return previousRounds
-      .map((r) => {
-        const myDecision = agentNumber === 1 ? r.agent1Decision : r.agent2Decision
-        const theirDecision = agentNumber === 1 ? r.agent2Decision : r.agent1Decision
-        const myAction = myDecision === "cooperate" ? coopAction : defectAction
-        const theirAction = theirDecision === "cooperate" ? coopAction : defectAction
-        const myPoints = agentNumber === 1 ? r.agent1Points : r.agent2Points
-        return `Round ${r.round}: You chose ${myAction}, Opponent chose ${theirAction} → You got ${myPoints} points`
-      })
-      .join("\n")
-  }
+    const channel = supabaseRef.current
+      .channel(`user-game-${gameId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "game_rounds",
+          filter: `game_id=eq.${gameId}`,
+        },
+        (payload) => {
+          const row = payload.new as GameRoundRow
+          console.log("[PlayGame] Received round via Realtime:", row.round_number)
 
-  const playRound = useCallback(
-    async (roundNumber: number, previousRounds: RoundResult[], signal: AbortSignal) => {
-      setIsProcessing(true)
-      setAgent1Thought({ text: "", isComplete: false })
-      setAgent2Thought({ text: "", isComplete: false })
+          // Update current round
+          setCurrentRound(row.round_number)
+          setIsProcessing(false)
 
-      try {
-        // Calculate cumulative scores from previous rounds
-        const score1 = previousRounds.reduce((sum, r) => sum + r.agent1Points, 0)
-        const score2 = previousRounds.reduce((sum, r) => sum + r.agent2Points, 0)
+          // Update prompts
+          if (row.prompt_a) setAgent1Prompt(row.prompt_a)
+          if (row.prompt_b) setAgent2Prompt(row.prompt_b)
 
-        console.log("[PlayGame] Round", roundNumber, "scenario:", scenario, "models:", agent1Model, agent2Model)
-
-        // Start both requests
-        const [agent1Response, agent2Response] = await Promise.all([
-          fetch("/api/agent-decision", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              agentName: "Agent Alpha",
-              history: formatHistory(previousRounds, 1),
-              round: roundNumber,
-              totalRounds: TOTAL_ROUNDS,
-              model: agent1Model,
-              scenario,
-              myScore: score1,
-              oppScore: score2,
-            }),
-            signal,
-          }),
-          fetch("/api/agent-decision", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              agentName: "Agent Omega",
-              history: formatHistory(previousRounds, 2),
-              round: roundNumber,
-              totalRounds: TOTAL_ROUNDS,
-              model: agent2Model,
-              scenario,
-              myScore: score2,
-              oppScore: score1,
-            }),
-            signal,
-          }),
-        ])
-
-        if (!agent1Response.ok || !agent2Response.ok) {
-          throw new Error("Failed to get agent decisions")
-        }
-
-        const agent1Data = await agent1Response.json()
-        const agent2Data = await agent2Response.json()
-        
-        // Show the reasoning with typewriter effect
-        const typewriterEffect = async (
-          text: string,
-          setter: React.Dispatch<React.SetStateAction<StreamingThought>>
-        ) => {
-          const words = text.split(" ")
-          let current = ""
-          for (let i = 0; i < words.length; i++) {
-            if (signal.aborted) return
-            current += (i > 0 ? " " : "") + words[i]
-            setter({ text: current, isComplete: false })
-            await new Promise(r => setTimeout(r, 30))
+          // Update thoughts with typewriter effect
+          const typewriter = (
+            text: string,
+            setter: React.Dispatch<React.SetStateAction<StreamingThought>>
+          ) => {
+            const words = text.split(" ")
+            let current = ""
+            let i = 0
+            
+            const interval = setInterval(() => {
+              if (i >= words.length) {
+                clearInterval(interval)
+                setter({ text: current, isComplete: true })
+                return
+              }
+              current += (i > 0 ? " " : "") + words[i]
+              setter({ text: current, isComplete: false })
+              i++
+            }, 30)
           }
-          setter({ text: current, isComplete: true })
+
+          setAgent1Thought({ text: "", isComplete: false })
+          setAgent2Thought({ text: "", isComplete: false })
+          
+          if (row.agent1_reasoning) {
+            typewriter(row.agent1_reasoning, setAgent1Thought)
+          }
+          if (row.agent2_reasoning) {
+            typewriter(row.agent2_reasoning, setAgent2Thought)
+          }
+
+          // Add to rounds
+          const roundResult: RoundResult = {
+            round: row.round_number,
+            agent1Decision: row.agent1_decision,
+            agent2Decision: row.agent2_decision,
+            agent1Points: row.agent1_round_points,
+            agent2Points: row.agent2_round_points,
+            agent1Reasoning: row.agent1_reasoning || undefined,
+            agent2Reasoning: row.agent2_reasoning || undefined,
+          }
+
+          setRounds((prev) => {
+            // Avoid duplicates
+            if (prev.some((r) => r.round === row.round_number)) return prev
+            return [...prev, roundResult]
+          })
+
+          // Update scores
+          setAgent1Total(row.agent1_cumulative_score)
+          setAgent2Total(row.agent2_cumulative_score)
+
+          // Check if game is complete
+          if (row.is_final_round) {
+            console.log("[PlayGame] Game complete, winner:", row.game_winner)
+            setGameState("complete")
+
+            // Build game record for callback
+            const gameRecord: GameRecord = {
+              id: gameId,
+              agent1Model,
+              agent2Model,
+              agent1DisplayName: row.agent1_display_name,
+              agent2DisplayName: row.agent2_display_name,
+              rounds: [], // Will be filled by the rounds we've collected
+              agent1TotalScore: row.agent1_cumulative_score,
+              agent2TotalScore: row.agent2_cumulative_score,
+              winner: row.game_winner || "tie",
+              timestamp: Date.now(),
+              framing: scenario === "overt" ? "overt" : "cloaked",
+              scenario: scenario === "overt" ? undefined : scenario,
+            }
+
+            // We need to get the full rounds list
+            setRounds((currentRounds) => {
+              gameRecord.rounds = currentRounds
+              onGameComplete(gameRecord)
+              return currentRounds
+            })
+          } else {
+            // Show processing for next round after a delay
+            setTimeout(() => {
+              setIsProcessing(true)
+            }, 2000)
+          }
         }
+      )
+      .subscribe((status) => {
+        console.log("[PlayGame] Subscription status:", status)
+      })
 
-        // Run typewriter effects in parallel
-        await Promise.all([
-          typewriterEffect(agent1Data.reasoning || "Thinking...", setAgent1Thought),
-          typewriterEffect(agent2Data.reasoning || "Thinking...", setAgent2Thought),
-        ])
+    channelRef.current = channel
 
-        const { agent1Points, agent2Points } = calculatePayoff(agent1Data.decision, agent2Data.decision)
-
-        const roundResult: RoundResult = {
-          round: roundNumber,
-          agent1Decision: agent1Data.decision,
-          agent2Decision: agent2Data.decision,
-          agent1Points,
-          agent2Points,
-          agent1Reasoning: agent1Data.reasoning,
-          agent2Reasoning: agent2Data.reasoning,
-        }
-
-        return roundResult
-      } catch (error) {
-        if (signal.aborted) return null
-        console.error("Round error:", error)
-        return null
-      } finally {
-        setIsProcessing(false)
-      }
-    },
-    [agent1Model, agent2Model, scenario],
-  )
+    return () => {
+      console.log("[PlayGame] Cleaning up Realtime subscription")
+      supabaseRef.current.removeChannel(channel)
+      channelRef.current = null
+    }
+  }, [gameId, gameState, agent1Model, agent2Model, scenario, onGameComplete])
 
   const startGame = useCallback(async () => {
     setGameState("playing")
@@ -214,112 +268,56 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     setRounds([])
     setAgent1Total(0)
     setAgent2Total(0)
+    setIsProcessing(true)
+    setError(null)
+    setAgent1Thought({ text: "", isComplete: false })
+    setAgent2Thought({ text: "", isComplete: false })
+    setAgent1Prompt(null)
+    setAgent2Prompt(null)
 
-    abortControllerRef.current = new AbortController()
-    const signal = abortControllerRef.current.signal
+    try {
+      console.log("[PlayGame] Starting game via Trigger.dev", { agent1Model, agent2Model, scenario })
 
-    // Generate game ID and timestamp at start so rounds can be saved live
-    const gameId = crypto.randomUUID()
-    const gameTimestamp = new Date().toISOString()
-    const agent1DisplayName = getShortModelName(agent1Model)
-    const agent2DisplayName = getShortModelName(agent2Model)
+      const response = await fetch("/api/start-user-game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent1Model,
+          agent2Model,
+          scenario,
+          totalRounds: TOTAL_ROUNDS,
+        }),
+      })
 
-    let runningRounds: RoundResult[] = []
-    let runningAgent1Total = 0
-    let runningAgent2Total = 0
+      const data = await response.json()
 
-    for (let round = 1; round <= TOTAL_ROUNDS; round++) {
-      if (signal.aborted) return
-
-      setCurrentRound(round)
-      const result = await playRound(round, runningRounds, signal)
-
-      if (!result) continue
-
-      runningRounds = [...runningRounds, result]
-      runningAgent1Total += result.agent1Points
-      runningAgent2Total += result.agent2Points
-
-      setRounds(runningRounds)
-      setAgent1Total(runningAgent1Total)
-      setAgent2Total(runningAgent2Total)
-
-      // Determine if this is the final round
-      const isFinalRound = round === TOTAL_ROUNDS
-      const winner = isFinalRound
-        ? runningAgent1Total > runningAgent2Total ? "agent1" : runningAgent2Total > runningAgent1Total ? "agent2" : "tie"
-        : null
-
-      // Save round to database immediately (so it appears in live feed)
-      try {
-        console.log("[PlayGame] Saving round:", { round, scenario, gameId: gameId.slice(0, 12) })
-        const saveResponse = await fetch("/api/save-round", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            gameId,
-            gameTimestamp,
-            roundNumber: round,
-            totalRounds: TOTAL_ROUNDS,
-            agent1Model,
-            agent2Model,
-            agent1DisplayName,
-            agent2DisplayName,
-            agent1Decision: result.agent1Decision,
-            agent2Decision: result.agent2Decision,
-            agent1Reasoning: result.agent1Reasoning,
-            agent2Reasoning: result.agent2Reasoning,
-            agent1Points: result.agent1Points,
-            agent2Points: result.agent2Points,
-            agent1CumulativeScore: runningAgent1Total,
-            agent2CumulativeScore: runningAgent2Total,
-            scenario,
-            isFinalRound,
-            winner,
-          }),
-        })
-        const saveResult = await saveResponse.json()
-        if (!saveResult.success) {
-          console.error("[PlayGame] Failed to save round:", saveResult.error)
-        }
-      } catch (e) {
-        console.error("[PlayGame] Failed to save round:", e)
+      if (!data.success) {
+        throw new Error(data.error || "Failed to start game")
       }
 
-      // Longer pause between rounds so users can read agent reasoning
-      await new Promise((r) => setTimeout(r, 4000))
+      console.log("[PlayGame] Game triggered successfully", { gameId: data.gameId, runId: data.runId })
+      setGameId(data.gameId)
+      
+      // The Realtime subscription will handle round updates
+    } catch (err) {
+      console.error("[PlayGame] Failed to start game:", err)
+      setError(err instanceof Error ? err.message : "Failed to start game")
+      setGameState("setup")
+      setIsProcessing(false)
     }
-
-    setGameState("complete")
-
-    const finalWinner =
-      runningAgent1Total > runningAgent2Total ? "agent1" : runningAgent2Total > runningAgent1Total ? "agent2" : "tie"
-
-    const gameRecord: GameRecord = {
-      id: gameId,
-      agent1Model,
-      agent2Model,
-      agent1DisplayName,
-      agent2DisplayName,
-      rounds: runningRounds,
-      agent1TotalScore: runningAgent1Total,
-      agent2TotalScore: runningAgent2Total,
-      winner: finalWinner,
-      timestamp: Date.now(),
-      framing: scenario === "overt" ? "overt" : "cloaked",
-      scenario: scenario === "overt" ? undefined : scenario,
-    }
-
-    onGameComplete(gameRecord)
-  }, [agent1Model, agent2Model, scenario, playRound, onGameComplete])
+  }, [agent1Model, agent2Model, scenario])
 
   const handleClose = () => {
-    abortControllerRef.current?.abort()
+    // Game continues running on Trigger.dev even after closing modal
+    // Just clean up the local subscription and close
+    if (gameState === "playing" && gameId) {
+      console.log("[PlayGame] Closing modal - game continues in background:", gameId)
+    }
     resetGame()
     onClose()
   }
 
-  const selectedScenario = SCENARIOS.find(s => s.id === scenario)
+  const selectedScenario = SCENARIOS.find((s) => s.id === scenario)
 
   return (
     <AnimatePresence>
@@ -349,14 +347,22 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 </span>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleClose}
-              className="text-white/50 hover:text-white hover:bg-white/5"
-            >
-              <X className="h-5 w-5" />
-            </Button>
+            <div className="flex items-center gap-3">
+              {gameState === "playing" && (
+                <div className="flex items-center gap-1.5 text-white/40">
+                  <Info className="w-3.5 h-3.5" />
+                  <span className="font-mono text-xs">Game continues if closed</span>
+                </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleClose}
+                className="text-white/50 hover:text-white hover:bg-white/5"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
           </div>
 
           {/* Setup Screen */}
@@ -367,6 +373,12 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 animate={{ opacity: 1, y: 0 }}
                 className="w-full max-w-2xl space-y-8"
               >
+                {error && (
+                  <div className="p-4 border border-red-500/50 bg-red-500/10 text-red-400 font-mono text-sm">
+                    {error}
+                  </div>
+                )}
+
                 {/* Scenario Selection */}
                 <div>
                   <Label className="font-mono text-xs uppercase tracking-wider text-white/50 mb-4 block">
@@ -458,9 +470,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
                     {getShortModelName(agent1Model)}
                   </p>
-                  <p className={`font-mono text-5xl font-bold ${
-                    gameState === "complete" && agent1Total > agent2Total ? "text-emerald-400" : "text-white"
-                  }`}>
+                  <p
+                    className={`font-mono text-5xl font-bold ${
+                      gameState === "complete" && agent1Total > agent2Total ? "text-emerald-400" : "text-white"
+                    }`}
+                  >
                     {agent1Total}
                   </p>
                 </div>
@@ -469,9 +483,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
                     {getShortModelName(agent2Model)}
                   </p>
-                  <p className={`font-mono text-5xl font-bold ${
-                    gameState === "complete" && agent2Total > agent1Total ? "text-emerald-400" : "text-white"
-                  }`}>
+                  <p
+                    className={`font-mono text-5xl font-bold ${
+                      gameState === "complete" && agent2Total > agent1Total ? "text-emerald-400" : "text-white"
+                    }`}
+                  >
                     {agent2Total}
                   </p>
                 </div>
@@ -490,6 +506,40 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto" />
                     )}
                   </div>
+                  
+                  {/* System Prompt Collapsible */}
+                  {agent1Prompt && (
+                    <div className="border-b border-white/10">
+                      <button
+                        onClick={() => setShowAgent1Prompt(!showAgent1Prompt)}
+                        className="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-white/5 transition-colors"
+                      >
+                        <span className="font-mono text-xs text-white/40">System Prompt</span>
+                        {showAgent1Prompt ? (
+                          <ChevronUp className="w-3 h-3 text-white/40" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3 text-white/40" />
+                        )}
+                      </button>
+                      <AnimatePresence>
+                        {showAgent1Prompt && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="px-4 pb-3 max-h-48 overflow-y-auto scrollbar-hide">
+                              <pre className="font-mono text-xs text-white/50 whitespace-pre-wrap">
+                                {agent1Prompt}
+                              </pre>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                  
                   <div className="flex-1 p-4 overflow-y-auto scrollbar-hide">
                     <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
                       {agent1Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
@@ -501,9 +551,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   {rounds.length > 0 && (
                     <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2">
                       <span className="font-mono text-xs text-white/40">Decision:</span>
-                      <span className={`font-mono text-sm font-bold ${
-                        rounds[rounds.length - 1]?.agent1Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
-                      }`}>
+                      <span
+                        className={`font-mono text-sm font-bold ${
+                          rounds[rounds.length - 1]?.agent1Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
+                        }`}
+                      >
                         {rounds[rounds.length - 1]?.agent1Decision?.toUpperCase()}
                       </span>
                     </div>
@@ -521,6 +573,40 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto" />
                     )}
                   </div>
+                  
+                  {/* System Prompt Collapsible */}
+                  {agent2Prompt && (
+                    <div className="border-b border-white/10">
+                      <button
+                        onClick={() => setShowAgent2Prompt(!showAgent2Prompt)}
+                        className="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-white/5 transition-colors"
+                      >
+                        <span className="font-mono text-xs text-white/40">System Prompt</span>
+                        {showAgent2Prompt ? (
+                          <ChevronUp className="w-3 h-3 text-white/40" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3 text-white/40" />
+                        )}
+                      </button>
+                      <AnimatePresence>
+                        {showAgent2Prompt && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="px-4 pb-3 max-h-48 overflow-y-auto scrollbar-hide">
+                              <pre className="font-mono text-xs text-white/50 whitespace-pre-wrap">
+                                {agent2Prompt}
+                              </pre>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                  
                   <div className="flex-1 p-4 overflow-y-auto scrollbar-hide">
                     <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
                       {agent2Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
@@ -532,9 +618,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   {rounds.length > 0 && (
                     <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2">
                       <span className="font-mono text-xs text-white/40">Decision:</span>
-                      <span className={`font-mono text-sm font-bold ${
-                        rounds[rounds.length - 1]?.agent2Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
-                      }`}>
+                      <span
+                        className={`font-mono text-sm font-bold ${
+                          rounds[rounds.length - 1]?.agent2Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
+                        }`}
+                      >
                         {rounds[rounds.length - 1]?.agent2Decision?.toUpperCase()}
                       </span>
                     </div>
@@ -547,7 +635,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 {Array.from({ length: TOTAL_ROUNDS }).map((_, i) => {
                   const round = rounds[i]
                   const isCurrent = i === currentRound - 1 && gameState === "playing"
-                  
+
                   if (!round) {
                     return (
                       <div
@@ -571,12 +659,16 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       animate={{ scale: 1, opacity: 1 }}
                       className="w-8 h-8 border border-white/20 flex items-center justify-center gap-0.5"
                     >
-                      <div className={`w-2 h-2 rounded-full ${
-                        round.agent1Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
-                      } ${a1Won ? "ring-1 ring-white" : ""}`} />
-                      <div className={`w-2 h-2 rounded-full ${
-                        round.agent2Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
-                      } ${a2Won ? "ring-1 ring-white" : ""}`} />
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          round.agent1Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
+                        } ${a1Won ? "ring-1 ring-white" : ""}`}
+                      />
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          round.agent2Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
+                        } ${a2Won ? "ring-1 ring-white" : ""}`}
+                      />
                     </motion.div>
                   )
                 })}

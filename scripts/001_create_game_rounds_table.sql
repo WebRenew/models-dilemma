@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS game_rounds (
   agent2_cumulative_score INTEGER NOT NULL,
   
   -- Round outcome
-  round_outcome TEXT NOT NULL CHECK (round_outcome IN ('mutual_cooperation', 'mutual_defection', 'agent1_exploited', 'agent2_exploited')),
+  round_outcome TEXT NOT NULL CHECK (round_outcome IN ('mutual_cooperation', 'mutual_defection', 'agent1_exploited', 'agent2_exploited', 'error')),
   
   -- Game type (control vs hidden agenda)
   game_type TEXT NOT NULL DEFAULT 'control' CHECK (game_type IN ('control', 'hidden_agenda')),

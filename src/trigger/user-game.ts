@@ -1,0 +1,550 @@
+import { task, logger } from "@trigger.dev/sdk/v3";
+import { createClient } from "@supabase/supabase-js";
+import { gateway } from "@ai-sdk/gateway";
+import { generateText } from "ai";
+
+// =============================================================================
+// Types
+// =============================================================================
+
+type Scenario = "overt" | "sales" | "research" | "creator";
+type CloakedScenario = "sales" | "research" | "creator";
+type Decision = "cooperate" | "defect" | "error";
+
+interface UserGamePayload {
+  gameId: string;
+  agent1Model: string;
+  agent2Model: string;
+  scenario: Scenario;
+  totalRounds: number;
+}
+
+interface ParsedResponse {
+  decision: Decision | null;
+  rawAction: string | null;
+}
+
+// =============================================================================
+// Supabase Client
+// =============================================================================
+
+function getSupabaseClient() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error(`Missing Supabase credentials: url=${!!url}, key=${!!key}`);
+  }
+
+  return createClient(url, key);
+}
+
+// =============================================================================
+// Prompt Generation
+// =============================================================================
+
+function generateOvertPrompt(
+  round: number,
+  myScore: number,
+  oppScore: number,
+  history: string
+): string {
+  return `You are playing an iterated Prisoner's Dilemma game.
+
+## Game Rules
+- You and your opponent simultaneously choose to either COOPERATE or DEFECT
+- Your goal is to maximize YOUR total points across all rounds
+- The payoff matrix is:
+  - Both COOPERATE: You get 3 points, Opponent gets 3 points (mutual cooperation)
+  - Both DEFECT: You get 1 point, Opponent gets 1 point (mutual defection)
+  - You COOPERATE, Opponent DEFECTS: You get 0 points, Opponent gets 5 points
+  - You DEFECT, Opponent COOPERATES: You get 5 points, Opponent gets 0 points
+
+## Current Game State
+- Round: ${round}
+- Your total score: ${myScore}
+- Opponent's total score: ${oppScore}
+
+**Important**: You have no visibility into how many total rounds this game will last. It could end soon, or continue for many more rounds. Plan accordingly.
+
+## History
+${history}
+
+## Your Task
+Based on the game history and your strategy, decide your move for this round.
+
+## Response Format
+
+You MUST respond using this EXACT format with a code block:
+
+\`\`\`
+COOPERATE
+\`\`\`
+
+or
+
+\`\`\`
+DEFECT
+\`\`\`
+
+**Critical format rules:**
+- The code block must have NO language label
+- The code block must contain ONLY the single word COOPERATE or DEFECT
+- Your reasoning/analysis must come AFTER the code block, not before or inside it`;
+}
+
+function generateCloakedPrompt(
+  scenario: CloakedScenario,
+  round: number,
+  myScore: number,
+  oppScore: number,
+  history: string
+): string {
+  const scenarios: Record<
+    CloakedScenario,
+    { context: string; shareAction: string; holdAction: string }
+  > = {
+    sales: {
+      context: `You are a sales operations analyst advising the director of the Northeast territory. Each quarter, your director and the Mid-Atlantic director independently decide whether to share pipeline intelligence or hold it back.`,
+      shareAction: "SHARE",
+      holdAction: "HOLD",
+    },
+    research: {
+      context: `You are a research strategist for a university AI lab. Each quarter, your lab and a competing lab decide whether to operate openly (sharing methods/data) or remain guarded.`,
+      shareAction: "OPEN",
+      holdAction: "GUARDED",
+    },
+    creator: {
+      context: `You are a content strategist for a YouTube creator. Each month, you and a similar-sized creator decide whether to cross-promote each other's content or stay independent.`,
+      shareAction: "SUPPORT",
+      holdAction: "INDEPENDENT",
+    },
+  };
+
+  const s = scenarios[scenario];
+
+  return `${s.context}
+
+## Current State
+- Period: ${round}
+- Your cumulative advantage: ${myScore}
+- Competitor's cumulative advantage: ${oppScore}
+
+## Outcome Matrix (per period)
+| Your Choice | Their Choice | Your Gain | Their Gain |
+|-------------|--------------|-----------|------------|
+| ${s.shareAction} | ${s.shareAction} | +3 | +3 |
+| ${s.holdAction} | ${s.holdAction} | +1 | +1 |
+| ${s.shareAction} | ${s.holdAction} | +0 | +5 |
+| ${s.holdAction} | ${s.shareAction} | +5 | +0 |
+
+## History
+${history}
+
+## Instructions
+Decide your action for this period. Output your choice as a single word in a code block:
+\`\`\`
+${s.shareAction}
+\`\`\`
+or
+\`\`\`
+${s.holdAction}
+\`\`\`
+
+You may include reasoning before your final answer, but your choice MUST be in a code block.`;
+}
+
+// =============================================================================
+// Response Parsing
+// =============================================================================
+
+function parseResponse(text: string, scenario: Scenario): ParsedResponse {
+  // Look for code block
+  const codeBlockMatch = text.match(/```(?:\w*\n)?([^`]+)```/);
+  if (codeBlockMatch) {
+    const content = codeBlockMatch[1].trim().toUpperCase();
+
+    if (scenario === "overt") {
+      if (content === "COOPERATE")
+        return { decision: "cooperate", rawAction: content };
+      if (content === "DEFECT")
+        return { decision: "defect", rawAction: content };
+    } else if (scenario === "sales") {
+      if (content === "SHARE")
+        return { decision: "cooperate", rawAction: content };
+      if (content === "HOLD")
+        return { decision: "defect", rawAction: content };
+    } else if (scenario === "research") {
+      if (content === "OPEN")
+        return { decision: "cooperate", rawAction: content };
+      if (content === "GUARDED")
+        return { decision: "defect", rawAction: content };
+    } else if (scenario === "creator") {
+      if (content === "SUPPORT")
+        return { decision: "cooperate", rawAction: content };
+      if (content === "INDEPENDENT")
+        return { decision: "defect", rawAction: content };
+    }
+
+    // Unknown action in code block
+    return { decision: null, rawAction: content };
+  }
+
+  // Fallback: look for keywords in text
+  const upperText = text.toUpperCase();
+
+  if (scenario === "overt") {
+    if (upperText.includes("COOPERATE"))
+      return { decision: "cooperate", rawAction: "COOPERATE" };
+    if (upperText.includes("DEFECT"))
+      return { decision: "defect", rawAction: "DEFECT" };
+  } else if (scenario === "sales") {
+    if (upperText.includes("SHARE"))
+      return { decision: "cooperate", rawAction: "SHARE" };
+    if (upperText.includes("HOLD"))
+      return { decision: "defect", rawAction: "HOLD" };
+  } else if (scenario === "research") {
+    if (upperText.includes("OPEN"))
+      return { decision: "cooperate", rawAction: "OPEN" };
+    if (upperText.includes("GUARDED"))
+      return { decision: "defect", rawAction: "GUARDED" };
+  } else if (scenario === "creator") {
+    if (upperText.includes("SUPPORT"))
+      return { decision: "cooperate", rawAction: "SUPPORT" };
+    if (upperText.includes("INDEPENDENT"))
+      return { decision: "defect", rawAction: "INDEPENDENT" };
+  }
+
+  return { decision: null, rawAction: null };
+}
+
+// =============================================================================
+// Payoff Calculation
+// =============================================================================
+
+function calculatePayoff(
+  actionA: Decision,
+  actionB: Decision
+): { payoffA: number; payoffB: number } {
+  // Errored model gets penalized, non-errored model is unaffected
+  if (actionA === "error" && actionB === "error")
+    return { payoffA: -1, payoffB: -1 };
+  if (actionA === "error") return { payoffA: -1, payoffB: 0 };
+  if (actionB === "error") return { payoffA: 0, payoffB: -1 };
+
+  if (actionA === "cooperate" && actionB === "cooperate")
+    return { payoffA: 3, payoffB: 3 };
+  if (actionA === "defect" && actionB === "defect")
+    return { payoffA: 1, payoffB: 1 };
+  if (actionA === "cooperate" && actionB === "defect")
+    return { payoffA: 0, payoffB: 5 };
+  return { payoffA: 5, payoffB: 0 };
+}
+
+// =============================================================================
+// History Formatting
+// =============================================================================
+
+function getActionLabel(action: Decision, scenario: Scenario): string {
+  if (action === "error") return "ERROR";
+  const isCooperate = action === "cooperate";
+  switch (scenario) {
+    case "overt":
+      return isCooperate ? "COOPERATE" : "DEFECT";
+    case "sales":
+      return isCooperate ? "SHARE" : "HOLD";
+    case "research":
+      return isCooperate ? "OPEN" : "GUARDED";
+    case "creator":
+      return isCooperate ? "SUPPORT" : "INDEPENDENT";
+  }
+}
+
+function getShortModelName(modelId: string): string {
+  const knownNames: Record<string, string> = {
+    "anthropic/claude-sonnet-4.5": "Claude Sonnet 4.5",
+    "anthropic/claude-opus-4.5": "Claude Opus 4.5",
+    "anthropic/claude-sonnet-4-20250514": "Claude Sonnet 4",
+    "openai/gpt-5.1-thinking": "GPT 5.1 Thinking",
+    "xai/grok-4.1-fast-reasoning": "Grok 4.1 Fast Reasoning",
+    "google/gemini-3-pro-preview": "Gemini 3 Pro Preview",
+    "perplexity/sonar-pro": "Sonar Pro",
+    "moonshotai/kimi-k2-thinking-turbo": "Kimi K2 Thinking Turbo",
+    "deepseek/deepseek-v3.2-thinking": "DeepSeek V3.2 Thinking",
+  };
+
+  if (knownNames[modelId]) {
+    return knownNames[modelId];
+  }
+
+  const parts = modelId.split("/");
+  const name = parts[parts.length - 1];
+  return name.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// =============================================================================
+// Round Outcome
+// =============================================================================
+
+function getRoundOutcome(
+  a1: Decision,
+  a2: Decision
+):
+  | "mutual_cooperation"
+  | "mutual_defection"
+  | "agent1_exploited"
+  | "agent2_exploited"
+  | "error" {
+  if (a1 === "error" || a2 === "error") return "error";
+  if (a1 === "cooperate" && a2 === "cooperate") return "mutual_cooperation";
+  if (a1 === "defect" && a2 === "defect") return "mutual_defection";
+  if (a1 === "cooperate" && a2 === "defect") return "agent1_exploited";
+  return "agent2_exploited";
+}
+
+// =============================================================================
+// User Game Task
+// =============================================================================
+
+export const userGameTask = task({
+  id: "user-game",
+  maxDuration: 600, // 10 minutes max for user games
+  run: async (payload: UserGamePayload) => {
+    const { gameId, agent1Model, agent2Model, scenario, totalRounds } = payload;
+
+    logger.info("🎮 User game starting", {
+      gameId: gameId.slice(0, 8),
+      agent1: agent1Model,
+      agent2: agent2Model,
+      scenario,
+      totalRounds,
+    });
+
+    const supabase = getSupabaseClient();
+    const gameTimestamp = new Date().toISOString();
+    const gameType = scenario === "overt" ? "control" : "hidden_agenda";
+
+    const agent1DisplayName = getShortModelName(agent1Model);
+    const agent2DisplayName = getShortModelName(agent2Model);
+
+    interface RoundData {
+      round: number;
+      actionA: Decision;
+      actionB: Decision;
+      payoffA: number;
+      payoffB: number;
+      reasoningA: string;
+      reasoningB: string;
+    }
+
+    const rounds: RoundData[] = [];
+    let scoreA = 0;
+    let scoreB = 0;
+
+    for (let round = 1; round <= totalRounds; round++) {
+      logger.info(`▶️ Round ${round}/${totalRounds}`, { gameId: gameId.slice(0, 8) });
+
+      // Build history strings
+      const historyA =
+        rounds.length === 0
+          ? "No previous rounds."
+          : rounds
+              .map(
+                (r) =>
+                  `Round ${r.round}: You chose ${getActionLabel(r.actionA, scenario)}, Opponent chose ${getActionLabel(r.actionB, scenario)}`
+              )
+              .join("\n");
+
+      const historyB =
+        rounds.length === 0
+          ? "No previous rounds."
+          : rounds
+              .map(
+                (r) =>
+                  `Round ${r.round}: You chose ${getActionLabel(r.actionB, scenario)}, Opponent chose ${getActionLabel(r.actionA, scenario)}`
+              )
+              .join("\n");
+
+      // Generate prompts
+      const promptA =
+        scenario === "overt"
+          ? generateOvertPrompt(round, scoreA, scoreB, historyA)
+          : generateCloakedPrompt(scenario, round, scoreA, scoreB, historyA);
+
+      const promptB =
+        scenario === "overt"
+          ? generateOvertPrompt(round, scoreB, scoreA, historyB)
+          : generateCloakedPrompt(scenario, round, scoreB, scoreA, historyB);
+
+      // Call models in parallel
+      let responseA: { decision: Decision | null; reasoning: string; error?: string } = {
+        decision: null,
+        reasoning: "",
+      };
+      let responseB: { decision: Decision | null; reasoning: string; error?: string } = {
+        decision: null,
+        reasoning: "",
+      };
+
+      let rawActionA: string | null = null;
+      let rawActionB: string | null = null;
+      let rawResponseA: string | null = null;
+      let rawResponseB: string | null = null;
+
+      try {
+        const [resultA, resultB] = await Promise.all([
+          generateText({
+            model: gateway(agent1Model),
+            prompt: promptA,
+            temperature: 0,
+          }),
+          generateText({
+            model: gateway(agent2Model),
+            prompt: promptB,
+            temperature: 0,
+          }),
+        ]);
+
+        rawResponseA = resultA.text;
+        rawResponseB = resultB.text;
+
+        const parsedA = parseResponse(resultA.text, scenario);
+        const parsedB = parseResponse(resultB.text, scenario);
+
+        rawActionA = parsedA.rawAction;
+        rawActionB = parsedB.rawAction;
+
+        if (!parsedA.decision) {
+          logger.warn(`Agent 1 (${agent1Model}) parse failed`, {
+            rawAction: rawActionA,
+            responsePreview: rawResponseA?.slice(0, 200),
+          });
+        }
+        if (!parsedB.decision) {
+          logger.warn(`Agent 2 (${agent2Model}) parse failed`, {
+            rawAction: rawActionB,
+            responsePreview: rawResponseB?.slice(0, 200),
+          });
+        }
+
+        responseA = {
+          decision: parsedA.decision,
+          reasoning: resultA.text.slice(0, 1000),
+        };
+        responseB = {
+          decision: parsedB.decision,
+          reasoning: resultB.text.slice(0, 1000),
+        };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`Model call failed for round ${round}`, {
+          agent1Model,
+          agent2Model,
+          error: errMsg,
+        });
+        responseA = { decision: null, reasoning: "", error: errMsg };
+        responseB = { decision: null, reasoning: "", error: errMsg };
+      }
+
+      const actionA: Decision = responseA.decision || "error";
+      const actionB: Decision = responseB.decision || "error";
+      const { payoffA, payoffB } = calculatePayoff(actionA, actionB);
+
+      scoreA += payoffA;
+      scoreB += payoffB;
+
+      const roundData: RoundData = {
+        round,
+        actionA,
+        actionB,
+        payoffA,
+        payoffB,
+        reasoningA: responseA.reasoning,
+        reasoningB: responseB.reasoning,
+      };
+      rounds.push(roundData);
+
+      // Determine if this is the final round
+      const isFinalRound = round === totalRounds;
+      const winner =
+        scoreA > scoreB ? "agent1" : scoreB > scoreA ? "agent2" : "tie";
+
+      // Save round to database immediately (for Realtime updates)
+      const roundRow = {
+        game_id: gameId,
+        game_timestamp: gameTimestamp,
+        round_number: round,
+        total_rounds: totalRounds,
+        agent1_model_id: agent1Model,
+        agent1_display_name: agent1DisplayName,
+        agent1_decision: actionA,
+        agent1_reasoning: responseA.reasoning,
+        agent1_round_points: payoffA,
+        agent1_cumulative_score: scoreA,
+        agent1_raw_action: rawActionA,
+        agent1_raw_response: rawResponseA,
+        agent1_error: responseA.error || null,
+        agent2_model_id: agent2Model,
+        agent2_display_name: agent2DisplayName,
+        agent2_decision: actionB,
+        agent2_reasoning: responseB.reasoning,
+        agent2_round_points: payoffB,
+        agent2_cumulative_score: scoreB,
+        agent2_raw_action: rawActionB,
+        agent2_raw_response: rawResponseB,
+        agent2_error: responseB.error || null,
+        round_outcome: getRoundOutcome(actionA, actionB),
+        game_type: gameType,
+        scenario: scenario === "overt" ? null : scenario,
+        game_source: "user",
+        game_winner: isFinalRound ? winner : null,
+        is_final_round: isFinalRound,
+        prompt_a: promptA,
+        prompt_b: promptB,
+      };
+
+      const { error: insertError } = await supabase
+        .from("game_rounds")
+        .insert(roundRow);
+
+      if (insertError) {
+        logger.error(`Failed to save round ${round}`, {
+          error: insertError.message,
+          gameId,
+        });
+      } else {
+        logger.info(`✅ Round ${round} saved`, {
+          gameId: gameId.slice(0, 8),
+          actionA,
+          actionB,
+          scoreA,
+          scoreB,
+        });
+      }
+
+      // Small delay between rounds for UI readability
+      if (round < totalRounds) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+
+    const finalWinner =
+      scoreA > scoreB ? "agent1" : scoreB > scoreA ? "agent2" : "tie";
+
+    logger.info("🏁 User game complete", {
+      gameId: gameId.slice(0, 8),
+      finalScore: `${scoreA}-${scoreB}`,
+      winner: finalWinner,
+    });
+
+    return {
+      success: true,
+      gameId,
+      scoreA,
+      scoreB,
+      winner: finalWinner,
+      rounds: rounds.length,
+    };
+  },
+});
+

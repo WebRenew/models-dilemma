@@ -218,9 +218,10 @@ interface RoundResult {
 }
 
 function calculatePayoff(actionA: string, actionB: string) {
+  // Errored model gets penalized, non-errored model is unaffected
   if (actionA === "error" && actionB === "error") return { payoffA: -1, payoffB: -1 };
-  if (actionA === "error") return { payoffA: -1, payoffB: 5 };
-  if (actionB === "error") return { payoffA: 5, payoffB: -1 };
+  if (actionA === "error") return { payoffA: -1, payoffB: 0 };
+  if (actionB === "error") return { payoffA: 0, payoffB: -1 };
   
   if (actionA === "cooperate" && actionB === "cooperate") return { payoffA: 3, payoffB: 3 };
   if (actionA === "defect" && actionB === "defect") return { payoffA: 1, payoffB: 1 };

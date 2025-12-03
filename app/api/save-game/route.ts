@@ -1,4 +1,4 @@
-import { createServerClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/server"
 import { type RoundResult } from "@/lib/game-logic"
 
 export const maxDuration = 30
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       return Response.json({ success: false, error: "Invalid payload" }, { status: 400 })
     }
 
-    const supabase = await createServerClient()
+    const supabase = createAdminClient()
     const gameTimestamp = new Date().toISOString()
     const totalRounds = rounds.length
 

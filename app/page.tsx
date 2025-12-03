@@ -16,15 +16,11 @@ import type { GameRecord } from "@/lib/game-logic"
 import { MODEL_COUNT } from "@/lib/models"
 import { fetchGameStats, fetchModelRankings, exportGameDataCSV, fetchStrategyStats } from "@/lib/supabase/db"
 import Link from "next/link"
-import { Play, Loader2 } from "lucide-react"
 
 export default function Home() {
   const [userGames, setUserGames] = useState<GameRecord[]>([])
   const [whitepaperOpen, setWhitepaperOpen] = useState(false)
   const [playGameOpen, setPlayGameOpen] = useState(false)
-  const [tournamentRunning, setTournamentRunning] = useState(false)
-  const [tournamentStatus, setTournamentStatus] = useState<string | null>(null)
-  const [gameRunning, setGameRunning] = useState(false)
   const [liveMatchCount, setLiveMatchCount] = useState(0)
 
   const [dbStats, setDbStats] = useState({ totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 })
@@ -99,85 +95,6 @@ export default function Home() {
     URL.revokeObjectURL(url)
   }, [])
 
-  const startTournament = useCallback(async () => {
-    if (tournamentRunning) return
-    
-    setTournamentRunning(true)
-    setTournamentStatus("Starting tournament...")
-    
-    try {
-      const response = await fetch("/api/start-tournament", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchesPerScenario: 25,
-          totalRounds: 10,
-        }),
-      })
-      
-      const data = await response.json()
-      
-      if (data.success) {
-        setTournamentStatus(`Tournament started! ${data.totalMatches} matches queued.`)
-        // Keep running state for a bit then reset
-        setTimeout(() => {
-          setTournamentRunning(false)
-          setTournamentStatus(null)
-        }, 5000)
-      } else {
-        throw new Error(data.error || "Failed to start tournament")
-      }
-    } catch (error) {
-      setTournamentStatus(`Error: ${error}`)
-      setTournamentRunning(false)
-      setTimeout(() => setTournamentStatus(null), 5000)
-    }
-  }, [tournamentRunning])
-
-  const triggerSingleGame = useCallback(async () => {
-    if (gameRunning) return
-    
-    setGameRunning(true)
-    
-    const scenarios = ["overt", "sales", "research", "creator"]
-    const scenario = scenarios[Math.floor(Math.random() * scenarios.length)]
-    
-    try {
-      const response = await fetch("/api/run-match", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          framing: scenario === "overt" ? "overt" : "cloaked",
-          scenario: scenario === "overt" ? undefined : scenario,
-          totalRounds: 10,
-          saveToDb: true,
-          streamRounds: true,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      // Read the stream to completion
-      const reader = response.body?.getReader()
-      if (reader) {
-        const decoder = new TextDecoder()
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          decoder.decode(value, { stream: true })
-        }
-      }
-      
-      loadStats()
-    } catch (error) {
-      console.error("Failed to trigger game:", error)
-    } finally {
-      setGameRunning(false)
-    }
-  }, [gameRunning, loadStats])
-
   const handleLiveMatchUpdate = useCallback((count: number) => {
     setLiveMatchCount(count)
   }, [])
@@ -195,48 +112,11 @@ export default function Home() {
           >
             Model Explorer
           </Link>
-          {liveMatchCount === 0 && !gameRunning ? (
-            <Button
-              onClick={triggerSingleGame}
-              size="sm"
-              className="font-mono text-xs uppercase tracking-wider bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/50"
-            >
-              <Play className="h-3 w-3 mr-2" />
-              Trigger Game
-            </Button>
-          ) : gameRunning ? (
-            <Button
-              disabled
-              size="sm"
-              className="font-mono text-xs uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 opacity-50"
-            >
-              <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-              Running...
-            </Button>
-          ) : (
+          {liveMatchCount > 0 && (
             <span className="font-mono text-xs text-emerald-400 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               {liveMatchCount} Live {liveMatchCount === 1 ? "Match" : "Matches"}
             </span>
-          )}
-          <Button
-            onClick={startTournament}
-            disabled={tournamentRunning}
-            size="sm"
-            variant="outline"
-            className="font-mono text-xs uppercase tracking-wider border-white/20 text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-50"
-          >
-            {tournamentRunning ? (
-              <>
-                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-                Tournament...
-              </>
-            ) : (
-              "Run Tournament"
-            )}
-          </Button>
-          {tournamentStatus && (
-            <span className="font-mono text-xs text-emerald-400/80">{tournamentStatus}</span>
           )}
         </div>
       </header>

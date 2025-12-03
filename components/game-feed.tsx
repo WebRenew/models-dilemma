@@ -396,11 +396,15 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
   // Poll for new completed games every 3 seconds
   useEffect(() => {
     const pollInterval = setInterval(async () => {
-      const newGames = await fetchNewGames(lastFetchTimeRef.current - 5000) // 5s buffer
+      const queryTime = lastFetchTimeRef.current - 10000 // 10s buffer for slow games
+      const newGames = await fetchNewGames(queryTime)
+
+      console.log('[pollNewGames] Found', newGames.length, 'games since', new Date(queryTime).toISOString())
 
       const trulyNewGames = newGames.filter((g) => !seenGameIdsRef.current.has(g.id))
 
       if (trulyNewGames.length > 0) {
+        console.log('[pollNewGames] Adding', trulyNewGames.length, 'new games to feed')
         trulyNewGames.forEach((g) => seenGameIdsRef.current.add(g.id))
         setDbGames((prev) => {
           const combined = [...trulyNewGames, ...prev]

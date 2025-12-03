@@ -346,12 +346,14 @@ export async function fetchNewGames(afterTimestamp: number): Promise<GameRecord[
   const supabase = createClient()
   const isoTimestamp = new Date(afterTimestamp).toISOString()
 
+  // Use created_at (when row was inserted) not game_timestamp (when game started)
+  // This ensures we catch games that took time to complete
   const { data: finalRounds, error } = await supabase
     .from("game_rounds")
     .select("*")
     .eq("is_final_round", true)
-    .gt("game_timestamp", isoTimestamp)
-    .order("game_timestamp", { ascending: false })
+    .gt("created_at", isoTimestamp)
+    .order("created_at", { ascending: false })
 
   if (error || !finalRounds || finalRounds.length === 0) {
     return []

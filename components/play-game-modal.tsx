@@ -216,6 +216,12 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     abortControllerRef.current = new AbortController()
     const signal = abortControllerRef.current.signal
 
+    // Generate game ID and timestamp at start so rounds can be saved live
+    const gameId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const gameTimestamp = new Date().toISOString()
+    const agent1DisplayName = getShortModelName(agent1Model)
+    const agent2DisplayName = getShortModelName(agent2Model)
+
     let runningRounds: RoundResult[] = []
     let runningAgent1Total = 0
     let runningAgent2Total = 0
@@ -236,18 +242,51 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
       setAgent1Total(runningAgent1Total)
       setAgent2Total(runningAgent2Total)
 
+      // Determine if this is the final round
+      const isFinalRound = round === TOTAL_ROUNDS
+      const winner = isFinalRound
+        ? runningAgent1Total > runningAgent2Total ? "agent1" : runningAgent2Total > runningAgent1Total ? "agent2" : "tie"
+        : null
+
+      // Save round to database immediately (so it appears in live feed)
+      try {
+        await fetch("/api/save-round", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            gameId,
+            gameTimestamp,
+            roundNumber: round,
+            totalRounds: TOTAL_ROUNDS,
+            agent1Model,
+            agent2Model,
+            agent1DisplayName,
+            agent2DisplayName,
+            agent1Decision: result.agent1Decision,
+            agent2Decision: result.agent2Decision,
+            agent1Reasoning: result.agent1Reasoning,
+            agent2Reasoning: result.agent2Reasoning,
+            agent1Points: result.agent1Points,
+            agent2Points: result.agent2Points,
+            agent1CumulativeScore: runningAgent1Total,
+            agent2CumulativeScore: runningAgent2Total,
+            scenario,
+            isFinalRound,
+            winner,
+          }),
+        })
+      } catch (e) {
+        console.error("Failed to save round:", e)
+      }
+
       // Brief pause between rounds
       await new Promise((r) => setTimeout(r, 500))
     }
 
     setGameState("complete")
 
-    const winner =
+    const finalWinner =
       runningAgent1Total > runningAgent2Total ? "agent1" : runningAgent2Total > runningAgent1Total ? "agent2" : "tie"
-
-    const gameId = `game-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-    const agent1DisplayName = getShortModelName(agent1Model)
-    const agent2DisplayName = getShortModelName(agent2Model)
 
     const gameRecord: GameRecord = {
       id: gameId,
@@ -258,39 +297,10 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
       rounds: runningRounds,
       agent1TotalScore: runningAgent1Total,
       agent2TotalScore: runningAgent2Total,
-      winner,
+      winner: finalWinner,
       timestamp: Date.now(),
       framing: scenario === "overt" ? "overt" : "cloaked",
       scenario: scenario === "overt" ? undefined : scenario,
-    }
-
-    // Save to database
-    try {
-      const response = await fetch("/api/save-game", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          gameId,
-          agent1Model,
-          agent2Model,
-          agent1DisplayName,
-          agent2DisplayName,
-          rounds: runningRounds,
-          agent1TotalScore: runningAgent1Total,
-          agent2TotalScore: runningAgent2Total,
-          winner,
-          scenario,
-          gameSource: "user",
-        }),
-      })
-      const result = await response.json()
-      if (!result.success) {
-        console.error("Failed to save game:", result.error)
-      } else {
-        console.log("Game saved:", result.gameId, "rounds:", result.roundsSaved)
-      }
-    } catch (e) {
-      console.error("Failed to save user game:", e)
     }
 
     onGameComplete(gameRecord)

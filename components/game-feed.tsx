@@ -26,6 +26,7 @@ interface LiveMatch {
   scoreA: number
   scoreB: number
   status: "running" | "completed" | "failed"
+  gameSource: "trigger" | "user" | string
   rounds: Array<{
     round: number
     actionA: string
@@ -154,6 +155,11 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             `Live • Round ${currentRound}/${match.totalRounds}`
           )}
         </span>
+        {match.gameSource === "user" && (
+          <span className="text-violet-400 font-mono text-[10px] uppercase tracking-wider ml-2 px-1.5 py-0.5 bg-violet-500/20 rounded">
+            User Game
+          </span>
+        )}
         <span className="ml-auto">
           <FramingIndicator framing={match.framing} scenario={match.scenario} />
         </span>
@@ -364,6 +370,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
           scoreA: lastRound.agent1_cumulative_score,
           scoreB: lastRound.agent2_cumulative_score,
           status: "running",
+          gameSource: firstRound.game_source || "trigger",
           rounds: sortedRounds.map((r) => ({
             round: r.round_number,
             actionA: r.agent1_decision,

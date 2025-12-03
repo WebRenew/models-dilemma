@@ -222,7 +222,7 @@ export default function ModelExplorerPage() {
                         stroke="rgba(255,255,255,0.5)"
                         tick={{ fontSize: 10, fontFamily: "monospace" }}
                       />
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
                       <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
@@ -245,7 +245,7 @@ export default function ModelExplorerPage() {
                         stroke="rgba(255,255,255,0.5)"
                         tick={{ fontSize: 10, fontFamily: "monospace" }}
                       />
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
                       <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
@@ -270,7 +270,7 @@ export default function ModelExplorerPage() {
                         stroke="rgba(255,255,255,0.5)"
                         tick={{ fontSize: 10, fontFamily: "monospace" }}
                       />
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="cooperations" name="Cooperations" stackId="a" fill="oklch(64.58% .199 147.27)" />
                       <Bar dataKey="defections" name="Defections" stackId="a" fill="oklch(62.56% .2234 23.03)" />
@@ -299,7 +299,7 @@ export default function ModelExplorerPage() {
                     stroke="rgba(255,255,255,0.5)"
                     tick={{ fontSize: 10, fontFamily: "monospace" }}
                   />
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Bar dataKey="wins" name="Wins" fill="oklch(64.58% .199 147.27)" />
                   <Bar dataKey="losses" name="Losses" fill="oklch(62.56% .2234 23.03)" />
@@ -342,7 +342,7 @@ export default function ModelExplorerPage() {
                         stroke="rgba(255,255,255,0.5)"
                         tick={{ fontSize: 10, fontFamily: "monospace" }}
                       />
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="share" name="SHARE" fill="#a855f7">
                         {salesData.map((entry, index) => (
@@ -373,7 +373,7 @@ export default function ModelExplorerPage() {
                         stroke="rgba(255,255,255,0.5)"
                         tick={{ fontSize: 10, fontFamily: "monospace" }}
                       />
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="open" name="OPEN" fill="#60a5fa">
                         {researchData.map((entry, index) => (
@@ -404,7 +404,7 @@ export default function ModelExplorerPage() {
                         stroke="rgba(255,255,255,0.5)"
                         tick={{ fontSize: 10, fontFamily: "monospace" }}
                       />
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="support" name="SUPPORT" fill="#f472b6">
                         {creatorData.map((entry, index) => (

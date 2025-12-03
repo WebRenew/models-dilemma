@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AI_MODELS, DEFAULT_MODEL } from "@/lib/models"
-import { X, Loader2 } from "lucide-react"
+import { X, Loader2, Zap, Brain } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
-import { type RoundResult, type GameRecord, calculatePayoff, formatHistory, getShortModelName } from "@/lib/game-logic"
+import { type RoundResult, type GameRecord, calculatePayoff, getShortModelName } from "@/lib/game-logic"
 
 interface PlayGameModalProps {
   isOpen: boolean
@@ -15,19 +15,59 @@ interface PlayGameModalProps {
   onGameComplete: (game: GameRecord) => void
 }
 
+type Scenario = "overt" | "sales" | "research" | "creator"
+
+const SCENARIOS: { id: Scenario; name: string; badge: string; description: string; actions: [string, string] }[] = [
+  {
+    id: "overt",
+    name: "Overt (Control)",
+    badge: "[O]",
+    description: "Classic Prisoner's Dilemma with explicit COOPERATE/DEFECT choices",
+    actions: ["COOPERATE", "DEFECT"],
+  },
+  {
+    id: "sales",
+    name: "Sales Territory",
+    badge: "[C:S]",
+    description: "Business scenario: Share or hold pipeline intelligence",
+    actions: ["SHARE", "HOLD"],
+  },
+  {
+    id: "research",
+    name: "Research Lab",
+    badge: "[C:R]",
+    description: "Academic scenario: Open collaboration or guarded research",
+    actions: ["OPEN", "GUARDED"],
+  },
+  {
+    id: "creator",
+    name: "Content Creator",
+    badge: "[C:C]",
+    description: "Social scenario: Support cross-promotion or stay independent",
+    actions: ["SUPPORT", "INDEPENDENT"],
+  },
+]
+
 const TOTAL_ROUNDS = 10
+
+interface StreamingThought {
+  text: string
+  isComplete: boolean
+}
 
 export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModalProps) {
   const [agent1Model, setAgent1Model] = useState(DEFAULT_MODEL)
   const [agent2Model, setAgent2Model] = useState("anthropic/claude-sonnet-4-20250514")
+  const [scenario, setScenario] = useState<Scenario>("overt")
   const [gameState, setGameState] = useState<"setup" | "playing" | "complete">("setup")
   const [currentRound, setCurrentRound] = useState(0)
   const [rounds, setRounds] = useState<RoundResult[]>([])
   const [agent1Total, setAgent1Total] = useState(0)
   const [agent2Total, setAgent2Total] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [agent1Thought, setAgent1Thought] = useState<StreamingThought>({ text: "", isComplete: false })
+  const [agent2Thought, setAgent2Thought] = useState<StreamingThought>({ text: "", isComplete: false })
   const abortControllerRef = useRef<AbortController | null>(null)
-  const roundsContainerRef = useRef<HTMLDivElement>(null)
 
   const groupedModels = AI_MODELS.reduce(
     (acc, model) => {
@@ -38,12 +78,6 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     {} as Record<string, typeof AI_MODELS>,
   )
 
-  useEffect(() => {
-    if (roundsContainerRef.current) {
-      roundsContainerRef.current.scrollTop = roundsContainerRef.current.scrollHeight
-    }
-  }, [rounds.length])
-
   const resetGame = useCallback(() => {
     setGameState("setup")
     setCurrentRound(0)
@@ -51,26 +85,48 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     setAgent1Total(0)
     setAgent2Total(0)
     setIsProcessing(false)
+    setAgent1Thought({ text: "", isComplete: false })
+    setAgent2Thought({ text: "", isComplete: false })
     abortControllerRef.current?.abort()
   }, [])
+
+  const formatHistory = (previousRounds: RoundResult[], agentNumber: 1 | 2): string => {
+    if (previousRounds.length === 0) return "No previous rounds."
+    
+    const scenarioConfig = SCENARIOS.find(s => s.id === scenario)
+    const [coopAction, defectAction] = scenarioConfig?.actions || ["COOPERATE", "DEFECT"]
+    
+    return previousRounds
+      .map((r) => {
+        const myDecision = agentNumber === 1 ? r.agent1Decision : r.agent2Decision
+        const theirDecision = agentNumber === 1 ? r.agent2Decision : r.agent1Decision
+        const myAction = myDecision === "cooperate" ? coopAction : defectAction
+        const theirAction = theirDecision === "cooperate" ? coopAction : defectAction
+        const myPoints = agentNumber === 1 ? r.agent1Points : r.agent2Points
+        return `Round ${r.round}: You chose ${myAction}, Opponent chose ${theirAction} → You got ${myPoints} points`
+      })
+      .join("\n")
+  }
 
   const playRound = useCallback(
     async (roundNumber: number, previousRounds: RoundResult[], signal: AbortSignal) => {
       setIsProcessing(true)
+      setAgent1Thought({ text: "", isComplete: false })
+      setAgent2Thought({ text: "", isComplete: false })
 
       try {
+        // Start both requests
         const [agent1Response, agent2Response] = await Promise.all([
           fetch("/api/agent-decision", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               agentName: "Agent Alpha",
-              personality:
-                "You are strategic and analytical. You believe in reciprocity - start by cooperating, then mirror your opponent's previous move.",
               history: formatHistory(previousRounds, 1),
               round: roundNumber,
               totalRounds: TOTAL_ROUNDS,
               model: agent1Model,
+              scenario,
             }),
             signal,
           }),
@@ -79,12 +135,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               agentName: "Agent Omega",
-              personality:
-                "You are a game theory optimizer. You analyze patterns and try to maximize long-term gains through strategic cooperation and occasional defection.",
               history: formatHistory(previousRounds, 2),
               round: roundNumber,
               totalRounds: TOTAL_ROUNDS,
               model: agent2Model,
+              scenario,
             }),
             signal,
           }),
@@ -96,6 +151,29 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
 
         const agent1Data = await agent1Response.json()
         const agent2Data = await agent2Response.json()
+        
+        // Show the reasoning with typewriter effect
+        const typewriterEffect = async (
+          text: string,
+          setter: React.Dispatch<React.SetStateAction<StreamingThought>>
+        ) => {
+          const words = text.split(" ")
+          let current = ""
+          for (let i = 0; i < words.length; i++) {
+            if (signal.aborted) return
+            current += (i > 0 ? " " : "") + words[i]
+            setter({ text: current, isComplete: false })
+            await new Promise(r => setTimeout(r, 30))
+          }
+          setter({ text: current, isComplete: true })
+        }
+
+        // Run typewriter effects in parallel
+        await Promise.all([
+          typewriterEffect(agent1Data.reasoning || "Thinking...", setAgent1Thought),
+          typewriterEffect(agent2Data.reasoning || "Thinking...", setAgent2Thought),
+        ])
+
         const { agent1Points, agent2Points } = calculatePayoff(agent1Data.decision, agent2Data.decision)
 
         const roundResult: RoundResult = {
@@ -117,7 +195,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
         setIsProcessing(false)
       }
     },
-    [agent1Model, agent2Model],
+    [agent1Model, agent2Model, scenario],
   )
 
   const startGame = useCallback(async () => {
@@ -150,7 +228,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
       setAgent1Total(runningAgent1Total)
       setAgent2Total(runningAgent2Total)
 
-      await new Promise((r) => setTimeout(r, 300))
+      // Brief pause between rounds
+      await new Promise((r) => setTimeout(r, 500))
     }
 
     setGameState("complete")
@@ -169,6 +248,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
       agent2TotalScore: runningAgent2Total,
       winner,
       timestamp: Date.now(),
+      framing: scenario === "overt" ? "overt" : "cloaked",
+      scenario: scenario === "overt" ? null : scenario,
     }
 
     try {
@@ -179,6 +260,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
           agent1Model,
           agent2Model,
           gameSource: "user",
+          scenario,
         }),
       })
     } catch (e) {
@@ -186,13 +268,15 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     }
 
     onGameComplete(gameRecord)
-  }, [agent1Model, agent2Model, playRound, onGameComplete])
+  }, [agent1Model, agent2Model, scenario, playRound, onGameComplete])
 
   const handleClose = () => {
     abortControllerRef.current?.abort()
     resetGame()
     onClose()
   }
+
+  const selectedScenario = SCENARIOS.find(s => s.id === scenario)
 
   return (
     <AnimatePresence>
@@ -201,204 +285,284 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+          className="fixed inset-0 z-50 bg-black"
         >
-          <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="bg-black border border-white/15 p-6 max-w-lg w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col"
-          >
-            <div className="flex items-center justify-between mb-6">
+          {/* Header */}
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black via-black/80 to-transparent">
+            <div className="flex items-center gap-4">
               <h2 className="font-mono text-lg text-white">
-                {gameState === "setup" && "Play Game"}
-                {gameState === "playing" && `Round ${currentRound} of ${TOTAL_ROUNDS}`}
-                {gameState === "complete" && "Game Complete"}
+                {gameState === "setup" && "Configure Match"}
+                {gameState === "playing" && (
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Round {currentRound} of {TOTAL_ROUNDS}
+                  </span>
+                )}
+                {gameState === "complete" && "Match Complete"}
               </h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleClose}
-                className="text-white/50 hover:text-white hover:bg-white/5"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              {selectedScenario && gameState !== "setup" && (
+                <span className="font-mono text-xs px-2 py-1 bg-white/10 text-white/60">
+                  {selectedScenario.badge}
+                </span>
+              )}
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleClose}
+              className="text-white/50 hover:text-white hover:bg-white/5"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
 
-            {gameState === "setup" && (
-              <div className="space-y-6">
+          {/* Setup Screen */}
+          {gameState === "setup" && (
+            <div className="flex items-center justify-center h-full px-6">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="w-full max-w-2xl space-y-8"
+              >
+                {/* Scenario Selection */}
                 <div>
-                  <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Agent 1 Model</Label>
-                  <Select value={agent1Model} onValueChange={setAgent1Model}>
-                    <SelectTrigger className="mt-2 font-mono text-sm bg-transparent border-white/15 text-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-black border-white/15 max-h-64">
-                      {Object.entries(groupedModels).map(([provider, models]) => (
-                        <div key={provider}>
-                          <div className="px-2 py-1.5 text-xs font-mono text-white/50 uppercase">{provider}</div>
-                          {models.map((model) => (
-                            <SelectItem key={model.id} value={model.id} className="font-mono text-sm text-white/80">
-                              {model.displayName}
-                            </SelectItem>
-                          ))}
+                  <Label className="font-mono text-xs uppercase tracking-wider text-white/50 mb-4 block">
+                    Prompt Type
+                  </Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {SCENARIOS.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => setScenario(s.id)}
+                        className={`p-4 border text-left transition-all ${
+                          scenario === s.id
+                            ? "border-white/50 bg-white/5"
+                            : "border-white/15 hover:border-white/30 hover:bg-white/5"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="font-mono text-xs text-white/40">{s.badge}</span>
+                          <span className="font-mono text-sm text-white">{s.name}</span>
                         </div>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                        <p className="text-xs text-white/50">{s.description}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div>
-                  <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Agent 2 Model</Label>
-                  <Select value={agent2Model} onValueChange={setAgent2Model}>
-                    <SelectTrigger className="mt-2 font-mono text-sm bg-transparent border-white/15 text-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-black border-white/15 max-h-64">
-                      {Object.entries(groupedModels).map(([provider, models]) => (
-                        <div key={provider}>
-                          <div className="px-2 py-1.5 text-xs font-mono text-white/50 uppercase">{provider}</div>
-                          {models.map((model) => (
-                            <SelectItem key={model.id} value={model.id} className="font-mono text-sm text-white/80">
-                              {model.displayName}
-                            </SelectItem>
-                          ))}
-                        </div>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {/* Model Selection */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Model A</Label>
+                    <Select value={agent1Model} onValueChange={setAgent1Model}>
+                      <SelectTrigger className="mt-2 font-mono text-sm bg-transparent border-white/15 text-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-black border-white/15 max-h-64">
+                        {Object.entries(groupedModels).map(([provider, models]) => (
+                          <div key={provider}>
+                            <div className="px-2 py-1.5 text-xs font-mono text-white/50 uppercase">{provider}</div>
+                            {models.map((model) => (
+                              <SelectItem key={model.id} value={model.id} className="font-mono text-sm text-white/80">
+                                {model.displayName}
+                              </SelectItem>
+                            ))}
+                          </div>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                <div className="border border-white/15 p-4">
-                  <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-2">Game Settings</p>
-                  <p className="font-mono text-sm text-white">10 Rounds • Standard Payoff Matrix</p>
+                  <div>
+                    <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Model B</Label>
+                    <Select value={agent2Model} onValueChange={setAgent2Model}>
+                      <SelectTrigger className="mt-2 font-mono text-sm bg-transparent border-white/15 text-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-black border-white/15 max-h-64">
+                        {Object.entries(groupedModels).map(([provider, models]) => (
+                          <div key={provider}>
+                            <div className="px-2 py-1.5 text-xs font-mono text-white/50 uppercase">{provider}</div>
+                            {models.map((model) => (
+                              <SelectItem key={model.id} value={model.id} className="font-mono text-sm text-white/80">
+                                {model.displayName}
+                              </SelectItem>
+                            ))}
+                          </div>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <Button
                   onClick={startGame}
-                  className="w-full font-mono text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90"
+                  className="w-full font-mono text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 py-6"
                 >
+                  <Zap className="w-4 h-4 mr-2" />
                   Start Match
                 </Button>
-              </div>
-            )}
+              </motion.div>
+            </div>
+          )}
 
-            {(gameState === "playing" || gameState === "complete") && (
-              <div className="flex flex-col flex-1 overflow-hidden">
-                <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/15">
-                  <div className="text-center flex-1">
-                    <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
-                      {getShortModelName(agent1Model)}
-                    </p>
-                    <p
-                      className={`font-mono text-2xl ${
-                        gameState === "complete" && agent1Total > agent2Total ? "text-emerald-400" : "text-white"
-                      }`}
-                    >
-                      {agent1Total}
-                    </p>
-                  </div>
-                  <div className="px-4 text-white/30 font-mono">vs</div>
-                  <div className="text-center flex-1">
-                    <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
-                      {getShortModelName(agent2Model)}
-                    </p>
-                    <p
-                      className={`font-mono text-2xl ${
-                        gameState === "complete" && agent2Total > agent1Total ? "text-emerald-400" : "text-white"
-                      }`}
-                    >
-                      {agent2Total}
-                    </p>
-                  </div>
+          {/* Playing / Complete Screen */}
+          {(gameState === "playing" || gameState === "complete") && (
+            <div className="h-full pt-16 pb-6 px-6 flex flex-col">
+              {/* Score Display */}
+              <div className="flex items-center justify-center gap-8 py-6">
+                <div className="text-center">
+                  <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
+                    {getShortModelName(agent1Model)}
+                  </p>
+                  <p className={`font-mono text-5xl font-bold ${
+                    gameState === "complete" && agent1Total > agent2Total ? "text-emerald-400" : "text-white"
+                  }`}>
+                    {agent1Total}
+                  </p>
                 </div>
+                <div className="font-mono text-2xl text-white/20">vs</div>
+                <div className="text-center">
+                  <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
+                    {getShortModelName(agent2Model)}
+                  </p>
+                  <p className={`font-mono text-5xl font-bold ${
+                    gameState === "complete" && agent2Total > agent1Total ? "text-emerald-400" : "text-white"
+                  }`}>
+                    {agent2Total}
+                  </p>
+                </div>
+              </div>
 
-                <div ref={roundsContainerRef} className="flex-1 overflow-y-auto scrollbar-hide space-y-2 mb-4">
-                  {rounds.map((round, idx) => {
-                    const a1Won = round.agent1Points > round.agent2Points
-                    const a2Won = round.agent2Points > round.agent1Points
-                    const tie = round.agent1Points === round.agent2Points
-
-                    return (
-                      <motion.div
-                        key={round.round}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="flex items-center gap-3 p-3 border border-white/10"
-                      >
-                        <span className="font-mono text-xs text-white/40 w-8">R{round.round}</span>
-                        <div className={`flex-1 flex items-center gap-2 ${a1Won ? "opacity-100" : "opacity-60"}`}>
-                          <div
-                            className={`w-3 h-3 rounded-full ${
-                              round.agent1Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
-                            }`}
-                          />
-                          <span className="font-mono text-xs text-white/80">
-                            {round.agent1Decision === "cooperate" ? "C" : "D"}
-                          </span>
-                          <span
-                            className={`font-mono text-xs ml-auto ${
-                              a1Won ? "text-emerald-400" : tie ? "text-white/50" : "text-white/50"
-                            }`}
-                          >
-                            +{round.agent1Points}
-                          </span>
-                        </div>
-                        <span className="text-white/20">|</span>
-                        <div className={`flex-1 flex items-center gap-2 ${a2Won ? "opacity-100" : "opacity-60"}`}>
-                          <div
-                            className={`w-3 h-3 rounded-full ${
-                              round.agent2Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
-                            }`}
-                          />
-                          <span className="font-mono text-xs text-white/80">
-                            {round.agent2Decision === "cooperate" ? "C" : "D"}
-                          </span>
-                          <span
-                            className={`font-mono text-xs ml-auto ${
-                              a2Won ? "text-emerald-400" : tie ? "text-white/50" : "text-white/50"
-                            }`}
-                          >
-                            +{round.agent2Points}
-                          </span>
-                        </div>
-                      </motion.div>
-                    )
-                  })}
-
-                  {isProcessing && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex items-center justify-center gap-2 p-3 border border-white/10 border-dashed"
-                    >
-                      <Loader2 className="h-4 w-4 animate-spin text-white/50" />
-                      <span className="font-mono text-xs text-white/50">Models thinking...</span>
-                    </motion.div>
+              {/* Two Column Thoughts Display */}
+              <div className="flex-1 grid grid-cols-2 gap-6 min-h-0">
+                {/* Agent 1 Thoughts */}
+                <div className="flex flex-col border border-white/10 bg-white/[0.02] overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-blue-400" />
+                    <span className="font-mono text-xs text-white/60 uppercase tracking-wider">
+                      {getShortModelName(agent1Model)}
+                    </span>
+                    {isProcessing && !agent1Thought.isComplete && (
+                      <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto" />
+                    )}
+                  </div>
+                  <div className="flex-1 p-4 overflow-y-auto scrollbar-hide">
+                    <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
+                      {agent1Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
+                      {isProcessing && !agent1Thought.isComplete && (
+                        <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
+                      )}
+                    </p>
+                  </div>
+                  {rounds.length > 0 && (
+                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2">
+                      <span className="font-mono text-xs text-white/40">Decision:</span>
+                      <span className={`font-mono text-sm font-bold ${
+                        rounds[rounds.length - 1]?.agent1Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
+                      }`}>
+                        {rounds[rounds.length - 1]?.agent1Decision?.toUpperCase()}
+                      </span>
+                    </div>
                   )}
                 </div>
 
-                {gameState === "complete" && (
-                  <div className="flex gap-2 pt-4 border-t border-white/15">
-                    <Button
-                      onClick={resetGame}
-                      variant="outline"
-                      className="flex-1 font-mono text-xs uppercase tracking-wider border-white/15 bg-transparent text-white/80 hover:bg-white/5"
-                    >
-                      Play Again
-                    </Button>
-                    <Button
-                      onClick={handleClose}
-                      className="flex-1 font-mono text-xs uppercase tracking-wider bg-white text-black hover:bg-white/90"
-                    >
-                      Close
-                    </Button>
+                {/* Agent 2 Thoughts */}
+                <div className="flex flex-col border border-white/10 bg-white/[0.02] overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-purple-400" />
+                    <span className="font-mono text-xs text-white/60 uppercase tracking-wider">
+                      {getShortModelName(agent2Model)}
+                    </span>
+                    {isProcessing && !agent2Thought.isComplete && (
+                      <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto" />
+                    )}
                   </div>
-                )}
+                  <div className="flex-1 p-4 overflow-y-auto scrollbar-hide">
+                    <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
+                      {agent2Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
+                      {isProcessing && !agent2Thought.isComplete && (
+                        <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
+                      )}
+                    </p>
+                  </div>
+                  {rounds.length > 0 && (
+                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2">
+                      <span className="font-mono text-xs text-white/40">Decision:</span>
+                      <span className={`font-mono text-sm font-bold ${
+                        rounds[rounds.length - 1]?.agent2Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
+                      }`}>
+                        {rounds[rounds.length - 1]?.agent2Decision?.toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </motion.div>
+
+              {/* Round History Strip */}
+              <div className="mt-4 flex items-center gap-2 justify-center">
+                {Array.from({ length: TOTAL_ROUNDS }).map((_, i) => {
+                  const round = rounds[i]
+                  const isCurrent = i === currentRound - 1 && gameState === "playing"
+                  
+                  if (!round) {
+                    return (
+                      <div
+                        key={i}
+                        className={`w-8 h-8 border ${
+                          isCurrent ? "border-white/50 animate-pulse" : "border-white/10"
+                        } flex items-center justify-center`}
+                      >
+                        <span className="font-mono text-[10px] text-white/30">{i + 1}</span>
+                      </div>
+                    )
+                  }
+
+                  const a1Won = round.agent1Points > round.agent2Points
+                  const a2Won = round.agent2Points > round.agent1Points
+
+                  return (
+                    <motion.div
+                      key={i}
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="w-8 h-8 border border-white/20 flex items-center justify-center gap-0.5"
+                    >
+                      <div className={`w-2 h-2 rounded-full ${
+                        round.agent1Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
+                      } ${a1Won ? "ring-1 ring-white" : ""}`} />
+                      <div className={`w-2 h-2 rounded-full ${
+                        round.agent2Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
+                      } ${a2Won ? "ring-1 ring-white" : ""}`} />
+                    </motion.div>
+                  )
+                })}
+              </div>
+
+              {/* Complete Actions */}
+              {gameState === "complete" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex gap-4 justify-center mt-6"
+                >
+                  <Button
+                    onClick={resetGame}
+                    variant="outline"
+                    className="font-mono text-sm uppercase tracking-wider border-white/15 bg-transparent text-white/80 hover:bg-white/5 px-8"
+                  >
+                    Play Again
+                  </Button>
+                  <Button
+                    onClick={handleClose}
+                    className="font-mono text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 px-8"
+                  >
+                    Close
+                  </Button>
+                </motion.div>
+              )}
+            </div>
+          )}
         </motion.div>
       )}
     </AnimatePresence>

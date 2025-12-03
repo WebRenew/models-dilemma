@@ -88,8 +88,7 @@ interface TournamentStats {
 
 function createSupabaseClient() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
-  // Handle common typo (extra Y)
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEYY
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
 
   if (!url || !key) {
     console.error("Available env vars:", Object.keys(process.env).filter(k => k.includes("SUPABASE")))

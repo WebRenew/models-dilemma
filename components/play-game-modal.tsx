@@ -279,8 +279,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
         console.error("Failed to save round:", e)
       }
 
-      // Brief pause between rounds
-      await new Promise((r) => setTimeout(r, 500))
+      // Longer pause between rounds so users can read agent reasoning
+      await new Promise((r) => setTimeout(r, 4000))
     }
 
     setGameState("complete")

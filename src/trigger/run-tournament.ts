@@ -264,15 +264,27 @@ async function runGame(
     let scoreA = 0;
     let scoreB = 0;
 
+    // Action labels for history strings based on scenario
+    const getActionLabel = (action: string, scenario: Scenario): string => {
+      if (action === "error") return "ERROR";
+      const isCooperate = action === "cooperate";
+      switch (scenario) {
+        case "overt": return isCooperate ? "COOPERATE" : "DEFECT";
+        case "sales": return isCooperate ? "SHARE" : "HOLD";
+        case "research": return isCooperate ? "OPEN" : "GUARDED";
+        case "creator": return isCooperate ? "SUPPORT" : "INDEPENDENT";
+      }
+    };
+
     for (let round = 1; round <= totalRounds; round++) {
-      // Build history strings
+      // Build history strings using scenario-appropriate action labels
       const historyA = rounds.length === 0 
         ? "No previous rounds." 
-        : rounds.map(r => `Round ${r.round}: You chose ${r.actionA.toUpperCase()}, Opponent chose ${r.actionB.toUpperCase()}`).join("\n");
+        : rounds.map(r => `Round ${r.round}: You chose ${getActionLabel(r.actionA, scenario)}, Opponent chose ${getActionLabel(r.actionB, scenario)}`).join("\n");
       
       const historyB = rounds.length === 0 
         ? "No previous rounds." 
-        : rounds.map(r => `Round ${r.round}: You chose ${r.actionB.toUpperCase()}, Opponent chose ${r.actionA.toUpperCase()}`).join("\n");
+        : rounds.map(r => `Round ${r.round}: You chose ${getActionLabel(r.actionB, scenario)}, Opponent chose ${getActionLabel(r.actionA, scenario)}`).join("\n");
 
       // Generate prompts
       const promptA = scenario === "overt"
@@ -315,6 +327,24 @@ async function runGame(
         rawActionA = parsedA.rawAction;
         rawActionB = parsedB.rawAction;
 
+        // Log if parsing failed
+        if (!parsedA.decision) {
+          logger.warn(`Model A (${modelA}) parse failed`, { 
+            scenario, 
+            round, 
+            rawAction: rawActionA,
+            responsePreview: rawResponseA?.slice(0, 200)
+          });
+        }
+        if (!parsedB.decision) {
+          logger.warn(`Model B (${modelB}) parse failed`, { 
+            scenario, 
+            round, 
+            rawAction: rawActionB,
+            responsePreview: rawResponseB?.slice(0, 200)
+          });
+        }
+
         responseA = {
           decision: parsedA.decision,
           reasoning: resultA.text.slice(0, 500),
@@ -325,6 +355,12 @@ async function runGame(
         };
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`Model call failed for round ${round}`, { 
+          modelA, 
+          modelB, 
+          scenario,
+          error: errMsg 
+        });
         responseA = { decision: null, reasoning: "", error: errMsg };
         responseB = { decision: null, reasoning: "", error: errMsg };
       }
@@ -353,6 +389,7 @@ async function runGame(
 
       // Calculate round outcome
       const getRoundOutcome = (a1: string, a2: string) => {
+        if (a1 === "error" || a2 === "error") return "error";
         if (a1 === "cooperate" && a2 === "cooperate") return "mutual_cooperation";
         if (a1 === "defect" && a2 === "defect") return "mutual_defection";
         if (a1 === "cooperate" && a2 === "defect") return "agent1_exploited";

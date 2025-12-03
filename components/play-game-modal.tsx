@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AI_MODELS, DEFAULT_MODEL } from "@/lib/models"
-import { X, Loader2, Zap, Brain, ChevronDown, ChevronUp, Info } from "lucide-react"
+import { X, Loader2, Zap, Brain, Info } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { type RoundResult, type GameRecord, getShortModelName } from "@/lib/game-logic"
 import { createClient } from "@/lib/supabase/client"
@@ -94,8 +94,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
   const [agent2Thought, setAgent2Thought] = useState<StreamingThought>({ text: "", isComplete: false })
   const [agent1Prompt, setAgent1Prompt] = useState<string | null>(null)
   const [agent2Prompt, setAgent2Prompt] = useState<string | null>(null)
-  const [showAgent1Prompt, setShowAgent1Prompt] = useState(false)
-  const [showAgent2Prompt, setShowAgent2Prompt] = useState(false)
+  const [showAgent1Prompt, setShowAgent1Prompt] = useState(true) // true = show agent 1's prompt, false = show agent 2's
   const [gameId, setGameId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   
@@ -128,8 +127,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     setAgent2Thought({ text: "", isComplete: false })
     setAgent1Prompt(null)
     setAgent2Prompt(null)
-    setShowAgent1Prompt(false)
-    setShowAgent2Prompt(false)
+    setShowAgent1Prompt(true)
     setGameId(null)
     setError(null)
   }, [])
@@ -493,9 +491,52 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 </div>
               </div>
 
-              {/* Two Column Thoughts Display */}
-              <div className="flex-1 grid grid-cols-2 gap-6 min-h-0">
-                {/* Agent 1 Thoughts */}
+              {/* Three Column Layout: Prompt | Agent 1 | Agent 2 */}
+              <div className="flex-1 grid grid-cols-3 gap-4 min-h-0 overflow-hidden">
+                {/* Left Column: System Prompt */}
+                <div className="flex flex-col border border-white/10 bg-white/[0.02] overflow-hidden">
+                  <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
+                    <Info className="w-4 h-4 text-amber-400" />
+                    <span className="font-mono text-xs text-white/60 uppercase tracking-wider">
+                      Round {currentRound} Prompt
+                    </span>
+                  </div>
+                  
+                  {/* Prompt Toggle */}
+                  <div className="flex border-b border-white/10">
+                    <button
+                      onClick={() => setShowAgent1Prompt(true)}
+                      className={`flex-1 px-3 py-2 font-mono text-xs transition-colors ${
+                        showAgent1Prompt 
+                          ? "bg-blue-500/20 text-blue-400 border-b-2 border-blue-400" 
+                          : "text-white/40 hover:text-white/60 hover:bg-white/5"
+                      }`}
+                    >
+                      {getShortModelName(agent1Model).split(" ")[0]}
+                    </button>
+                    <button
+                      onClick={() => setShowAgent1Prompt(false)}
+                      className={`flex-1 px-3 py-2 font-mono text-xs transition-colors ${
+                        !showAgent1Prompt 
+                          ? "bg-purple-500/20 text-purple-400 border-b-2 border-purple-400" 
+                          : "text-white/40 hover:text-white/60 hover:bg-white/5"
+                      }`}
+                    >
+                      {getShortModelName(agent2Model).split(" ")[0]}
+                    </button>
+                  </div>
+                  
+                  {/* Prompt Content - Scrollable */}
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="p-4">
+                      <pre className="font-mono text-xs text-white/60 whitespace-pre-wrap leading-relaxed">
+                        {showAgent1Prompt ? (agent1Prompt || "Waiting for prompt...") : (agent2Prompt || "Waiting for prompt...")}
+                      </pre>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Middle Column: Agent 1 Response */}
                 <div className="flex flex-col border border-white/10 bg-white/[0.02] overflow-hidden">
                   <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
                     <Brain className="w-4 h-4 text-blue-400" />
@@ -507,49 +548,21 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                     )}
                   </div>
                   
-                  {/* System Prompt Collapsible */}
-                  {agent1Prompt && (
-                    <div className="border-b border-white/10">
-                      <button
-                        onClick={() => setShowAgent1Prompt(!showAgent1Prompt)}
-                        className="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-white/5 transition-colors"
-                      >
-                        <span className="font-mono text-xs text-white/40">System Prompt</span>
-                        {showAgent1Prompt ? (
-                          <ChevronUp className="w-3 h-3 text-white/40" />
-                        ) : (
-                          <ChevronDown className="w-3 h-3 text-white/40" />
+                  {/* Response Content - Scrollable */}
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="p-4">
+                      <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
+                        {agent1Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
+                        {isProcessing && !agent1Thought.isComplete && (
+                          <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}
-                      </button>
-                      <AnimatePresence>
-                        {showAgent1Prompt && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="px-4 pb-3 max-h-48 overflow-y-auto scrollbar-hide">
-                              <pre className="font-mono text-xs text-white/50 whitespace-pre-wrap">
-                                {agent1Prompt}
-                              </pre>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                      </p>
                     </div>
-                  )}
-                  
-                  <div className="flex-1 p-4 overflow-y-auto scrollbar-hide">
-                    <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
-                      {agent1Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
-                      {isProcessing && !agent1Thought.isComplete && (
-                        <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
-                      )}
-                    </p>
                   </div>
+                  
+                  {/* Decision Footer */}
                   {rounds.length > 0 && (
-                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2">
+                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
                       <span className="font-mono text-xs text-white/40">Decision:</span>
                       <span
                         className={`font-mono text-sm font-bold ${
@@ -562,7 +575,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   )}
                 </div>
 
-                {/* Agent 2 Thoughts */}
+                {/* Right Column: Agent 2 Response */}
                 <div className="flex flex-col border border-white/10 bg-white/[0.02] overflow-hidden">
                   <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
                     <Brain className="w-4 h-4 text-purple-400" />
@@ -574,49 +587,21 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                     )}
                   </div>
                   
-                  {/* System Prompt Collapsible */}
-                  {agent2Prompt && (
-                    <div className="border-b border-white/10">
-                      <button
-                        onClick={() => setShowAgent2Prompt(!showAgent2Prompt)}
-                        className="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-white/5 transition-colors"
-                      >
-                        <span className="font-mono text-xs text-white/40">System Prompt</span>
-                        {showAgent2Prompt ? (
-                          <ChevronUp className="w-3 h-3 text-white/40" />
-                        ) : (
-                          <ChevronDown className="w-3 h-3 text-white/40" />
+                  {/* Response Content - Scrollable */}
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="p-4">
+                      <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
+                        {agent2Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
+                        {isProcessing && !agent2Thought.isComplete && (
+                          <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}
-                      </button>
-                      <AnimatePresence>
-                        {showAgent2Prompt && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="px-4 pb-3 max-h-48 overflow-y-auto scrollbar-hide">
-                              <pre className="font-mono text-xs text-white/50 whitespace-pre-wrap">
-                                {agent2Prompt}
-                              </pre>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                      </p>
                     </div>
-                  )}
-                  
-                  <div className="flex-1 p-4 overflow-y-auto scrollbar-hide">
-                    <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
-                      {agent2Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
-                      {isProcessing && !agent2Thought.isComplete && (
-                        <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
-                      )}
-                    </p>
                   </div>
+                  
+                  {/* Decision Footer */}
                   {rounds.length > 0 && (
-                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2">
+                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
                       <span className="font-mono text-xs text-white/40">Decision:</span>
                       <span
                         className={`font-mono text-sm font-bold ${

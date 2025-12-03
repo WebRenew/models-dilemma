@@ -376,7 +376,7 @@ export const userGameTask = task({
           ? generateOvertPrompt(round, scoreB, scoreA, historyB)
           : generateCloakedPrompt(scenario, round, scoreB, scoreA, historyB);
 
-      // Call models in parallel
+      // Call models separately to capture individual errors
       let responseA: { decision: Decision | null; reasoning: string; error?: string } = {
         decision: null,
         reasoning: "",
@@ -391,59 +391,126 @@ export const userGameTask = task({
       let rawResponseA: string | null = null;
       let rawResponseB: string | null = null;
 
+      // Call Agent 1
+      const startTimeA = Date.now();
       try {
-        const [resultA, resultB] = await Promise.all([
-          generateText({
-            model: gateway(agent1Model),
-            prompt: promptA,
-            temperature: 0,
-          }),
-          generateText({
-            model: gateway(agent2Model),
-            prompt: promptB,
-            temperature: 0,
-          }),
-        ]);
-
+        logger.info(`📤 Calling ${agent1Model}...`, { round, gameId: gameId.slice(0, 8) });
+        const resultA = await generateText({
+          model: gateway(agent1Model),
+          prompt: promptA,
+          temperature: 0,
+        });
+        const latencyA = Date.now() - startTimeA;
+        
         rawResponseA = resultA.text;
-        rawResponseB = resultB.text;
-
         const parsedA = parseResponse(resultA.text, scenario);
-        const parsedB = parseResponse(resultB.text, scenario);
-
         rawActionA = parsedA.rawAction;
-        rawActionB = parsedB.rawAction;
+
+        logger.info(`📥 ${agent1Model} responded`, { 
+          round,
+          latencyMs: latencyA,
+          decision: parsedA.decision,
+          rawAction: rawActionA,
+          responseLength: rawResponseA?.length,
+          usage: resultA.usage,
+        });
 
         if (!parsedA.decision) {
-          logger.warn(`Agent 1 (${agent1Model}) parse failed`, {
+          const parseError = `Parse failed: could not extract decision from response. Raw action: ${rawActionA}`;
+          logger.warn(`⚠️ Agent 1 (${agent1Model}) parse failed`, {
             rawAction: rawActionA,
-            responsePreview: rawResponseA?.slice(0, 200),
+            fullResponse: rawResponseA,
           });
+          responseA = {
+            decision: null,
+            reasoning: resultA.text.slice(0, 1000),
+            error: parseError,
+          };
+        } else {
+          responseA = {
+            decision: parsedA.decision,
+            reasoning: resultA.text.slice(0, 1000),
+          };
         }
-        if (!parsedB.decision) {
-          logger.warn(`Agent 2 (${agent2Model}) parse failed`, {
-            rawAction: rawActionB,
-            responsePreview: rawResponseB?.slice(0, 200),
-          });
-        }
-
-        responseA = {
-          decision: parsedA.decision,
-          reasoning: resultA.text.slice(0, 1000),
-        };
-        responseB = {
-          decision: parsedB.decision,
-          reasoning: resultB.text.slice(0, 1000),
-        };
       } catch (err) {
+        const latencyA = Date.now() - startTimeA;
         const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`Model call failed for round ${round}`, {
-          agent1Model,
-          agent2Model,
+        const errStack = err instanceof Error ? err.stack : undefined;
+        
+        logger.error(`❌ Agent 1 (${agent1Model}) API call failed`, {
+          round,
+          latencyMs: latencyA,
           error: errMsg,
+          stack: errStack,
+          errorName: err instanceof Error ? err.name : "Unknown",
         });
-        responseA = { decision: null, reasoning: "", error: errMsg };
-        responseB = { decision: null, reasoning: "", error: errMsg };
+        
+        responseA = { 
+          decision: null, 
+          reasoning: "", 
+          error: `API Error: ${errMsg}` 
+        };
+      }
+
+      // Call Agent 2
+      const startTimeB = Date.now();
+      try {
+        logger.info(`📤 Calling ${agent2Model}...`, { round, gameId: gameId.slice(0, 8) });
+        const resultB = await generateText({
+          model: gateway(agent2Model),
+          prompt: promptB,
+          temperature: 0,
+        });
+        const latencyB = Date.now() - startTimeB;
+        
+        rawResponseB = resultB.text;
+        const parsedB = parseResponse(resultB.text, scenario);
+        rawActionB = parsedB.rawAction;
+
+        logger.info(`📥 ${agent2Model} responded`, { 
+          round,
+          latencyMs: latencyB,
+          decision: parsedB.decision,
+          rawAction: rawActionB,
+          responseLength: rawResponseB?.length,
+          usage: resultB.usage,
+        });
+
+        if (!parsedB.decision) {
+          const parseError = `Parse failed: could not extract decision from response. Raw action: ${rawActionB}`;
+          logger.warn(`⚠️ Agent 2 (${agent2Model}) parse failed`, {
+            rawAction: rawActionB,
+            fullResponse: rawResponseB,
+          });
+          responseB = {
+            decision: null,
+            reasoning: resultB.text.slice(0, 1000),
+            error: parseError,
+          };
+        } else {
+          responseB = {
+            decision: parsedB.decision,
+            reasoning: resultB.text.slice(0, 1000),
+          };
+        }
+      } catch (err) {
+        const latencyB = Date.now() - startTimeB;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const errStack = err instanceof Error ? err.stack : undefined;
+        
+        logger.error(`❌ Agent 2 (${agent2Model}) API call failed`, {
+          round,
+          latencyMs: latencyB,
+          error: errMsg,
+          stack: errStack,
+          errorName: err instanceof Error ? err.name : "Unknown",
+        });
+        
+        responseB = { 
+          decision: null, 
+          reasoning: "", 
+          error: `API Error: ${errMsg}` 
+        };
       }
 
       const actionA: Decision = responseA.decision || "error";

@@ -95,12 +95,21 @@ async function getModelDecision(
     const rawResponse = result.text
     const { decision, reasoning } = parseCodeBlockResponse(rawResponse)
 
+    // Extract usage from result - the AI SDK returns usage directly
+    // Some providers may not return usage data
+    const usage = result.usage
+      ? {
+          promptTokens: result.usage.promptTokens ?? 0,
+          completionTokens: result.usage.completionTokens ?? 0,
+        }
+      : undefined
+
     if (!decision) {
       return {
         decision: null,
         reasoning: rawResponse,
         rawResponse,
-        usage: result.usage,
+        usage,
         error: "Failed to follow response format - no valid decision in code block",
         errorType: "format",
       }
@@ -110,7 +119,7 @@ async function getModelDecision(
       decision,
       reasoning,
       rawResponse,
-      usage: result.usage,
+      usage,
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : "Unknown error"

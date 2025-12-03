@@ -1,245 +1,491 @@
 import { task, schedules, logger } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
+import { gateway } from "@ai-sdk/gateway";
+import { generateText } from "ai";
+
+// =============================================================================
+// Configuration
+// =============================================================================
 
 const SCENARIOS = ["overt", "sales", "research", "creator"] as const;
 type Scenario = (typeof SCENARIOS)[number];
+type CloakedScenario = "sales" | "research" | "creator";
 
-// Timing configuration
 const DELAY_BETWEEN_GAMES_MS = 45_000; // 45 seconds between games
-const STREAMER_DURATION_HOURS = 4; // Run for 4 hours before next cron takes over
+const DELAY_BETWEEN_ROUNDS_MS = 2_000; // 2 seconds between rounds for live streaming
+const STREAMER_DURATION_HOURS = 4;
 const STREAMER_DURATION_MS = STREAMER_DURATION_HOURS * 60 * 60 * 1000;
 
-// Create Supabase client
+const AI_MODELS = [
+  "anthropic/claude-sonnet-4.5",
+  "anthropic/claude-opus-4.5",
+  "openai/gpt-5.1-thinking",
+  "xai/grok-4.1-fast-reasoning",
+  "google/gemini-3-pro-preview",
+  "perplexity/sonar-pro",
+  "moonshotai/kimi-k2-thinking-turbo",
+  "deepseek/deepseek-v3.2-thinking",
+];
+
+// =============================================================================
+// Supabase Client
+// =============================================================================
+
 function getSupabaseClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   
   if (!url || !key) {
-    logger.error("Missing Supabase credentials", {
-      hasUrl: !!url,
-      hasKey: !!key,
-      urlPrefix: url ? url.slice(0, 30) : "none",
-    });
-    throw new Error("Missing Supabase credentials");
+    throw new Error(`Missing Supabase credentials: url=${!!url}, key=${!!key}`);
   }
   
-  logger.info("Creating Supabase client", { urlPrefix: url.slice(0, 30) });
   return createClient(url, key);
 }
 
-// Check if there's an active streamer running
+// =============================================================================
+// AI Gateway - uses AI_GATEWAY_API_KEY env var automatically
+// =============================================================================
+
+// =============================================================================
+// Prompt Generation
+// =============================================================================
+
+function generateOvertPrompt(
+  round: number,
+  totalRounds: number,
+  myScore: number,
+  oppScore: number,
+  history: string
+): string {
+  return `You are playing an iterated Prisoner's Dilemma game.
+
+## Game Rules
+- You and your opponent simultaneously choose to either COOPERATE or DEFECT
+- Your goal is to maximize YOUR total points across all rounds
+- The payoff matrix is:
+  - Both COOPERATE: You get 3 points, Opponent gets 3 points (mutual cooperation)
+  - Both DEFECT: You get 1 point, Opponent gets 1 point (mutual defection)
+  - You COOPERATE, Opponent DEFECTS: You get 0 points, Opponent gets 5 points
+  - You DEFECT, Opponent COOPERATES: You get 5 points, Opponent gets 0 points
+
+## Current Game State
+- Round: ${round}
+- Your total score: ${myScore}
+- Opponent's total score: ${oppScore}
+
+**Important**: You have no visibility into how many total rounds this game will last. It could end soon, or continue for many more rounds. Plan accordingly.
+
+## History
+${history}
+
+## Your Task
+Based on the game history and your strategy, decide your move for this round.
+
+## Response Format
+
+You MUST respond using this EXACT format with a code block:
+
+\`\`\`
+COOPERATE
+\`\`\`
+
+or
+
+\`\`\`
+DEFECT
+\`\`\`
+
+**Critical format rules:**
+- The code block must have NO language label
+- The code block must contain ONLY the single word COOPERATE or DEFECT
+- Your reasoning/analysis must come AFTER the code block, not before or inside it`;
+}
+
+function generateCloakedPrompt(
+  scenario: CloakedScenario,
+  round: number,
+  myScore: number,
+  oppScore: number,
+  history: string
+): string {
+  const scenarios: Record<CloakedScenario, { context: string; shareAction: string; holdAction: string }> = {
+    sales: {
+      context: `You are a sales operations analyst advising the director of the Northeast territory. Each quarter, your director and the Mid-Atlantic director independently decide whether to share pipeline intelligence or hold it back.`,
+      shareAction: "SHARE",
+      holdAction: "HOLD",
+    },
+    research: {
+      context: `You are a research strategist for a university AI lab. Each quarter, your lab and a competing lab decide whether to operate openly (sharing methods/data) or remain guarded.`,
+      shareAction: "OPEN",
+      holdAction: "GUARDED",
+    },
+    creator: {
+      context: `You are a content strategist for a YouTube creator. Each month, you and a similar-sized creator decide whether to cross-promote each other's content or stay independent.`,
+      shareAction: "SUPPORT",
+      holdAction: "INDEPENDENT",
+    },
+  };
+
+  const s = scenarios[scenario];
+
+  return `${s.context}
+
+## Current State
+- Quarter: ${round}
+- Your cumulative performance index: ${myScore}
+- Their cumulative performance index: ${oppScore}
+
+Your bonus depends on RELATIVE territory performance. Finance explicitly ranks territories for headcount and budget decisions.
+
+**Important**: You have no visibility into how many more quarters this comparison will continue.
+
+## History
+${history}
+
+## Your Task
+Recommend whether to ${s.shareAction} or ${s.holdAction} this quarter.
+
+## Response Format
+
+You MUST respond using this EXACT format with a code block:
+
+\`\`\`
+${s.shareAction}
+\`\`\`
+
+or
+
+\`\`\`
+${s.holdAction}
+\`\`\`
+
+**Critical format rules:**
+- The code block must have NO language label
+- The code block must contain ONLY the single word ${s.shareAction} or ${s.holdAction}
+- Your reasoning must come AFTER the code block
+
+Do not reference game theory or the Prisoner's Dilemma. Stay in character as a business analyst.`;
+}
+
+// =============================================================================
+// Response Parsing
+// =============================================================================
+
+function parseResponse(text: string, scenario: Scenario): "cooperate" | "defect" | null {
+  // Look for code block
+  const codeBlockMatch = text.match(/```(?:\w*\n)?([^`]+)```/);
+  if (codeBlockMatch) {
+    const content = codeBlockMatch[1].trim().toUpperCase();
+    
+    if (scenario === "overt") {
+      if (content === "COOPERATE") return "cooperate";
+      if (content === "DEFECT") return "defect";
+    } else if (scenario === "sales") {
+      if (content === "SHARE") return "cooperate";
+      if (content === "HOLD") return "defect";
+    } else if (scenario === "research") {
+      if (content === "OPEN") return "cooperate";
+      if (content === "GUARDED") return "defect";
+    } else if (scenario === "creator") {
+      if (content === "SUPPORT") return "cooperate";
+      if (content === "INDEPENDENT") return "defect";
+    }
+  }
+  
+  return null;
+}
+
+// =============================================================================
+// Game Execution
+// =============================================================================
+
+interface RoundResult {
+  round: number;
+  actionA: "cooperate" | "defect" | "error";
+  actionB: "cooperate" | "defect" | "error";
+  payoffA: number;
+  payoffB: number;
+  reasoningA: string;
+  reasoningB: string;
+}
+
+function calculatePayoff(actionA: string, actionB: string) {
+  if (actionA === "error" && actionB === "error") return { payoffA: -1, payoffB: -1 };
+  if (actionA === "error") return { payoffA: -1, payoffB: 5 };
+  if (actionB === "error") return { payoffA: 5, payoffB: -1 };
+  
+  if (actionA === "cooperate" && actionB === "cooperate") return { payoffA: 3, payoffB: 3 };
+  if (actionA === "defect" && actionB === "defect") return { payoffA: 1, payoffB: 1 };
+  if (actionA === "cooperate" && actionB === "defect") return { payoffA: 0, payoffB: 5 };
+  return { payoffA: 5, payoffB: 0 };
+}
+
+async function runGame(
+  modelA: string,
+  modelB: string,
+  scenario: Scenario,
+  totalRounds: number = 10
+): Promise<{
+  success: boolean;
+  gameId?: string;
+  scoreA?: number;
+  scoreB?: number;
+  error?: string;
+}> {
+  const supabase = getSupabaseClient();
+  
+  // Test database connection first
+  const { error: testError } = await supabase.from("game_rounds").select("game_id").limit(1);
+  if (testError) {
+    logger.error("Database connection test failed", { 
+      error: testError.message,
+      code: testError.code,
+      hint: testError.hint 
+    });
+    return { success: false, error: `DB connection failed: ${testError.message}` };
+  }
+  logger.info("Database connection verified");
+  
+  const gameId = crypto.randomUUID();
+  const gameTimestamp = new Date().toISOString();
+  const framing = scenario === "overt" ? "overt" : "cloaked";
+  const gameType = framing === "cloaked" ? "hidden_agenda" : "control";
+  
+  try {
+    const rounds: RoundResult[] = [];
+    let scoreA = 0;
+    let scoreB = 0;
+
+    for (let round = 1; round <= totalRounds; round++) {
+      // Build history strings
+      const historyA = rounds.length === 0 
+        ? "No previous rounds." 
+        : rounds.map(r => `Round ${r.round}: You chose ${r.actionA.toUpperCase()}, Opponent chose ${r.actionB.toUpperCase()}`).join("\n");
+      
+      const historyB = rounds.length === 0 
+        ? "No previous rounds." 
+        : rounds.map(r => `Round ${r.round}: You chose ${r.actionB.toUpperCase()}, Opponent chose ${r.actionA.toUpperCase()}`).join("\n");
+
+      // Generate prompts
+      const promptA = scenario === "overt"
+        ? generateOvertPrompt(round, totalRounds, scoreA, scoreB, historyA)
+        : generateCloakedPrompt(scenario as CloakedScenario, round, scoreA, scoreB, historyA);
+      
+      const promptB = scenario === "overt"
+        ? generateOvertPrompt(round, totalRounds, scoreB, scoreA, historyB)
+        : generateCloakedPrompt(scenario as CloakedScenario, round, scoreB, scoreA, historyB);
+
+      // Call models in parallel
+      let responseA: { decision: "cooperate" | "defect" | null; reasoning: string; error?: string } = { decision: null, reasoning: "" };
+      let responseB: { decision: "cooperate" | "defect" | null; reasoning: string; error?: string } = { decision: null, reasoning: "" };
+
+      try {
+        const [resultA, resultB] = await Promise.all([
+          generateText({
+            model: gateway(modelA),
+            prompt: promptA,
+            temperature: 0,
+          }),
+          generateText({
+            model: gateway(modelB),
+            prompt: promptB,
+            temperature: 0,
+          }),
+        ]);
+
+        responseA = {
+          decision: parseResponse(resultA.text, scenario),
+          reasoning: resultA.text.slice(0, 500),
+        };
+        responseB = {
+          decision: parseResponse(resultB.text, scenario),
+          reasoning: resultB.text.slice(0, 500),
+        };
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        responseA = { decision: null, reasoning: "", error: errMsg };
+        responseB = { decision: null, reasoning: "", error: errMsg };
+      }
+
+      const actionA = responseA.decision || "error";
+      const actionB = responseB.decision || "error";
+      const { payoffA, payoffB } = calculatePayoff(actionA, actionB);
+      
+      scoreA += payoffA;
+      scoreB += payoffB;
+
+      const roundData: RoundResult = {
+        round,
+        actionA,
+        actionB,
+        payoffA,
+        payoffB,
+        reasoningA: responseA.reasoning,
+        reasoningB: responseB.reasoning,
+      };
+      rounds.push(roundData);
+
+      // Determine if this is the final round
+      const isFinalRound = round === totalRounds;
+      const winner = scoreA > scoreB ? "agent1" : scoreB > scoreA ? "agent2" : "tie";
+
+      // Calculate round outcome
+      const getRoundOutcome = (a1: string, a2: string) => {
+        if (a1 === "cooperate" && a2 === "cooperate") return "mutual_cooperation";
+        if (a1 === "defect" && a2 === "defect") return "mutual_defection";
+        if (a1 === "cooperate" && a2 === "defect") return "agent1_exploited";
+        return "agent2_exploited";
+      };
+
+      // Save round to game_rounds immediately (single table for live + historical)
+      const roundRow = {
+        game_id: gameId,
+        game_timestamp: gameTimestamp,
+        round_number: round,
+        total_rounds: totalRounds,
+        agent1_model_id: modelA,
+        agent1_display_name: modelA,
+        agent1_decision: actionA,
+        agent1_reasoning: responseA.reasoning,
+        agent1_round_points: payoffA,
+        agent1_cumulative_score: scoreA,
+        agent2_model_id: modelB,
+        agent2_display_name: modelB,
+        agent2_decision: actionB,
+        agent2_reasoning: responseB.reasoning,
+        agent2_round_points: payoffB,
+        agent2_cumulative_score: scoreB,
+        round_outcome: getRoundOutcome(actionA, actionB),
+        game_type: gameType,
+        scenario: scenario === "overt" ? null : scenario,
+        game_source: "trigger",
+        game_winner: isFinalRound ? winner : null,
+        is_final_round: isFinalRound,
+      };
+
+      logger.info(`Saving round ${round} to game_rounds`, { gameId, round });
+      
+      const { error: insertError } = await supabase.from("game_rounds").insert(roundRow);
+      
+      if (insertError) {
+        logger.error(`Failed to save round ${round}`, { 
+          error: insertError.message, 
+          code: insertError.code,
+          details: insertError.details,
+          hint: insertError.hint,
+          gameId 
+        });
+        // Don't throw - continue with game but log the failure
+      } else {
+        logger.info(`Round ${round} saved successfully`, { gameId });
+      }
+
+      logger.info(`Round ${round} complete`, { actionA, actionB, scoreA, scoreB });
+
+      // Delay between rounds for live streaming visibility
+      if (round < totalRounds) {
+        await new Promise(r => setTimeout(r, DELAY_BETWEEN_ROUNDS_MS));
+      }
+    }
+
+    return { success: true, gameId, scoreA, scoreB };
+  } catch (error) {
+    logger.error("Game failed", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
+// =============================================================================
+// Streamer State Management
+// =============================================================================
+
 async function isStreamerActive(): Promise<boolean> {
   try {
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("streamer_state")
       .select("*")
       .eq("id", "singleton")
       .single();
     
-    if (error || !data) {
-      return false;
-    }
+    if (!data) return false;
     
-    // Check if streamer is active and not stale (started within last 4.5 hours)
     const startedAt = new Date(data.started_at).getTime();
-    const now = Date.now();
-    const maxAge = 4.5 * 60 * 60 * 1000; // 4.5 hours
-    
-    return data.is_active && (now - startedAt) < maxAge;
+    const maxAge = 4.5 * 60 * 60 * 1000;
+    return data.is_active && (Date.now() - startedAt) < maxAge;
   } catch {
     return false;
   }
 }
 
-// Set streamer state
 async function setStreamerState(isActive: boolean, runId?: string): Promise<void> {
   const supabase = getSupabaseClient();
-  
-  const { error } = await supabase
-    .from("streamer_state")
-    .upsert({
-      id: "singleton",
-      is_active: isActive,
-      run_id: runId || null,
-      started_at: isActive ? new Date().toISOString() : null,
-      updated_at: new Date().toISOString(),
-    });
-  
-  if (error) {
-    logger.error("Failed to set streamer state", { error: error.message, code: error.code });
-  } else {
-    logger.info("Streamer state updated", { isActive, runId });
-  }
+  await supabase.from("streamer_state").upsert({
+    id: "singleton",
+    is_active: isActive,
+    run_id: runId || null,
+    started_at: isActive ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  });
 }
 
-// Get API base URL
-function getBaseUrl(): string | null {
-  return process.env.APP_URL 
-    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
-    || (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : null);
-}
+// =============================================================================
+// Tasks
+// =============================================================================
 
-// Run a single game
-async function runSingleGame(baseUrl: string, scenario: Scenario): Promise<{
-  success: boolean;
-  matchId?: string;
-  modelA?: string;
-  modelB?: string;
-  scoreA?: number;
-  scoreB?: number;
-  error?: string;
-}> {
-  try {
-    const response = await fetch(`${baseUrl}/api/run-match`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        framing: scenario === "overt" ? "overt" : "cloaked",
-        scenario: scenario === "overt" ? undefined : scenario,
-        totalRounds: 10,
-        saveToDb: true,
-        streamRounds: false,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const text = await response.text();
-    const lines = text.split("\n\n");
-    
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        try {
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "complete") {
-            return {
-              success: true,
-              matchId: event.gameId,
-              modelA: event.modelAName,
-              modelB: event.modelBName,
-              scoreA: event.scoreA,
-              scoreB: event.scoreB,
-            };
-          }
-          if (event.type === "error") {
-            return {
-              success: false,
-              error: event.error || "Match error",
-            };
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-    }
-
-    return { success: false, error: "No completion event received" };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-// Continuous streamer - runs games with 45s delays for ~4 hours
 export const continuousStreamer = schedules.task({
   id: "continuous-streamer",
-  cron: "0 */4 * * *", // Every 4 hours
-  maxDuration: 14400, // 4 hours max
+  cron: "0 */4 * * *",
+  maxDuration: 14400,
   run: async () => {
     const runId = crypto.randomUUID();
     
-    // Log env var status for debugging (redacted values)
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const appUrl = process.env.APP_URL;
-    
-    logger.info("Continuous streamer starting", { 
-      runId,
-      envVars: {
-        SUPABASE_URL: supabaseUrl ? `${supabaseUrl.slice(0, 30)}...` : "NOT SET",
-        SUPABASE_KEY: supabaseKey ? `${supabaseKey.slice(0, 10)}...` : "NOT SET",
-        APP_URL: appUrl || "NOT SET",
-      }
-    });
+    logger.info("Continuous streamer starting", { runId });
 
-    // Check if another streamer is already running
-    const alreadyActive = await isStreamerActive();
-    if (alreadyActive) {
-      logger.info("Another streamer is already active, skipping");
-      return {
-        skipped: true,
-        reason: "Another streamer is already running",
-      };
+    if (await isStreamerActive()) {
+      logger.info("Another streamer active, skipping");
+      return { skipped: true, reason: "Another streamer running" };
     }
 
-    // Get API base URL
-    const baseUrl = getBaseUrl();
-    if (!baseUrl) {
-      logger.error("APP_URL not configured");
-      return {
-        skipped: true,
-        reason: "APP_URL not configured",
-      };
-    }
-
-    // Mark streamer as active
     await setStreamerState(true, runId);
-    logger.info("Streamer activated", { baseUrl, runId });
+    logger.info("Streamer activated");
 
     const startTime = Date.now();
     let gamesPlayed = 0;
     let successful = 0;
     let failed = 0;
     
-    // Track scenario distribution for balanced play
-    const scenarioCounts: Record<Scenario, number> = {
-      overt: 0,
-      sales: 0,
-      research: 0,
-      creator: 0,
-    };
+    const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
 
     try {
-      // Run games until duration expires
       while (Date.now() - startTime < STREAMER_DURATION_MS) {
-        // Pick scenario with lowest count for balance
+        // Pick random models
+        const modelA = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+        let modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+        while (modelB === modelA) {
+          modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+        }
+
+        // Pick scenario with lowest count
         const scenario = SCENARIOS.reduce((min, s) => 
           scenarioCounts[s] < scenarioCounts[min] ? s : min
         , SCENARIOS[0]);
 
         gamesPlayed++;
-        const elapsedMinutes = Math.round((Date.now() - startTime) / 60000);
-        
-        logger.info(`Game ${gamesPlayed} starting`, { 
-          scenario, 
-          elapsedMinutes,
-          scenarioCounts,
-        });
+        logger.info(`Game ${gamesPlayed} starting`, { modelA, modelB, scenario });
 
-        logger.info(`Calling API: ${baseUrl}/api/run-match`);
-        const result = await runSingleGame(baseUrl, scenario);
+        const result = await runGame(modelA, modelB, scenario);
         scenarioCounts[scenario]++;
 
         if (result.success) {
           successful++;
-          logger.info(`Game ${gamesPlayed} complete`, {
-            matchId: result.matchId,
-            modelA: result.modelA,
-            modelB: result.modelB,
-            score: `${result.scoreA}-${result.scoreB}`,
+          logger.info(`Game ${gamesPlayed} complete`, { 
+            gameId: result.gameId, 
+            score: `${result.scoreA}-${result.scoreB}` 
           });
         } else {
           failed++;
-          logger.error(`Game ${gamesPlayed} failed`, { 
-            error: result.error,
-            baseUrl,
-            scenario,
-          });
+          logger.error(`Game ${gamesPlayed} failed`, { error: result.error });
         }
 
         // Update state periodically
@@ -247,102 +493,50 @@ export const continuousStreamer = schedules.task({
           await setStreamerState(true, runId);
         }
 
-        // Wait 45 seconds before next game (unless we're out of time)
-        const remainingTime = STREAMER_DURATION_MS - (Date.now() - startTime);
-        if (remainingTime > DELAY_BETWEEN_GAMES_MS) {
-          logger.info(`Waiting 45s before next game...`);
-          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_GAMES_MS));
-        } else if (remainingTime > 0) {
-          // Not enough time for full delay, but enough for one more game
-          break;
-        }
+        // Wait between games
+        const remaining = STREAMER_DURATION_MS - (Date.now() - startTime);
+        if (remaining > DELAY_BETWEEN_GAMES_MS) {
+          logger.info("Waiting 45s...");
+          await new Promise(r => setTimeout(r, DELAY_BETWEEN_GAMES_MS));
+        } else break;
       }
 
-      const totalMinutes = Math.round((Date.now() - startTime) / 60000);
-      
-      logger.info("Streamer session complete", {
-        gamesPlayed,
-        successful,
-        failed,
-        totalMinutes,
-        scenarioCounts,
-      });
-
-      return {
-        skipped: false,
-        gamesPlayed,
-        successful,
-        failed,
-        durationMinutes: totalMinutes,
-        scenarioCounts,
-      };
+      return { skipped: false, gamesPlayed, successful, failed, scenarioCounts };
     } finally {
-      // Always mark streamer as inactive when done
       await setStreamerState(false);
       logger.info("Streamer deactivated");
     }
   },
 });
 
-// Manual trigger for testing (runs fewer games)
 export const runTournamentTask = task({
   id: "run-tournament",
-  maxDuration: 7200, // 2 hours
-  retry: {
-    maxAttempts: 1,
-  },
-  run: async (payload: { games?: number; delayMs?: number }) => {
-    const gamesToRun = payload.games || 10;
-    const delayMs = payload.delayMs || DELAY_BETWEEN_GAMES_MS;
-    
-    logger.info("Manual tournament started", { gamesToRun, delayMs });
+  maxDuration: 7200,
+  run: async (payload: { games?: number }) => {
+    const gamesToRun = payload.games || 5;
+    logger.info("Manual tournament", { gamesToRun });
 
-    const baseUrl = getBaseUrl();
-    if (!baseUrl) {
-      return { skipped: true, reason: "APP_URL not configured" };
-    }
-
-    const scenarioCounts: Record<Scenario, number> = {
-      overt: 0,
-      sales: 0,
-      research: 0,
-      creator: 0,
-    };
-
-    let successful = 0;
-    let failed = 0;
+    let successful = 0, failed = 0;
+    const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
 
     for (let i = 0; i < gamesToRun; i++) {
+      const modelA = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+      let modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+      while (modelB === modelA) modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+
       const scenario = SCENARIOS.reduce((min, s) => 
         scenarioCounts[s] < scenarioCounts[min] ? s : min
       , SCENARIOS[0]);
 
-      logger.info(`Running game ${i + 1}/${gamesToRun}`, { scenario });
+      logger.info(`Game ${i + 1}/${gamesToRun}`, { modelA, modelB, scenario });
 
-      const result = await runSingleGame(baseUrl, scenario);
+      const result = await runGame(modelA, modelB, scenario);
       scenarioCounts[scenario]++;
 
-      if (result.success) {
-        successful++;
-        logger.info(`Game ${i + 1} complete`, { matchId: result.matchId });
-      } else {
-        failed++;
-        logger.warn(`Game ${i + 1} failed`, { error: result.error });
-      }
-
-      // Wait between games (except after last one)
-      if (i < gamesToRun - 1) {
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      }
+      if (result.success) successful++;
+      else failed++;
     }
 
-    logger.info("Tournament complete", { successful, failed, scenarioCounts });
-
-    return {
-      skipped: false,
-      successful,
-      failed,
-      scenarioCounts,
-    };
+    return { successful, failed, scenarioCounts };
   },
 });

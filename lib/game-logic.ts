@@ -67,52 +67,30 @@ export interface GameRecord {
   scenario?: "sales" | "research" | "creator" | null
 }
 
+// Import needs to be at top of file but we'll use a lookup map
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  "anthropic/claude-sonnet-4.5": "Claude Sonnet 4.5",
+  "anthropic/claude-opus-4.5": "Claude Opus 4.5",
+  "anthropic/claude-sonnet-4-20250514": "Claude Sonnet 4",
+  "openai/gpt-5.1-thinking": "GPT 5.1 Thinking",
+  "xai/grok-4.1-fast-reasoning": "Grok 4.1 Fast Reasoning",
+  "google/gemini-3-pro-preview": "Gemini 3 Pro Preview",
+  "perplexity/sonar-pro": "Sonar Pro",
+  "moonshotai/kimi-k2-thinking-turbo": "Kimi K2 Thinking Turbo",
+  "deepseek/deepseek-v3.2-thinking": "DeepSeek V3.2 Thinking",
+}
+
 export function getShortModelName(modelId: string): string {
+  // First check our known models lookup
+  if (MODEL_DISPLAY_NAMES[modelId]) {
+    return MODEL_DISPLAY_NAMES[modelId]
+  }
+
+  // Fallback: extract and clean up the model name
   const parts = modelId.split("/")
   const name = parts[parts.length - 1]
-
-  // More specific matching - order matters (most specific first)
-  if (name.includes("gpt-4o-mini")) return "GPT-4o-mini"
-  if (name.includes("gpt-4o")) return "GPT-4o"
-  if (name.includes("gpt-4-turbo")) return "GPT-4 Turbo"
-  if (name.includes("gpt-5")) return "GPT-5"
-  if (name.includes("gpt-4")) return "GPT-4"
-  if (name.includes("o3-mini")) return "o3-mini"
-  if (name.includes("o3")) return "o3"
-  if (name.includes("o1-mini")) return "o1-mini"
-  if (name.includes("o1")) return "o1"
-  if (name.includes("claude-sonnet-4")) return "Claude Sonnet 4"
-  if (name.includes("claude-3-5-sonnet")) return "Claude 3.5 Sonnet"
-  if (name.includes("claude-3-opus")) return "Claude 3 Opus"
-  if (name.includes("claude-opus-4")) return "Claude Opus 4"
-  if (name.includes("gemini-2.0-flash")) return "Gemini 2.0 Flash"
-  if (name.includes("gemini-2.5-pro")) return "Gemini 2.5 Pro"
-  if (name.includes("gemini-2.5-flash")) return "Gemini 2.5 Flash"
-  if (name.includes("gemini")) return "Gemini"
-  if (name.includes("grok-4")) return "Grok 4"
-  if (name.includes("grok-3")) return "Grok 3"
-  if (name.includes("grok-2")) return "Grok 2"
-  if (name.includes("llama-4")) return "Llama 4"
-  if (name.includes("llama-3.3")) return "Llama 3.3"
-  if (name.includes("llama-3.2")) return "Llama 3.2"
-  if (name.includes("llama-3.1")) return "Llama 3.1"
-  if (name.includes("qwen3")) return "Qwen3"
-  if (name.includes("qwen2.5")) return "Qwen 2.5"
-  if (name.includes("qwen")) return "Qwen"
-  if (name.includes("mistral-large")) return "Mistral Large"
-  if (name.includes("mistral-small")) return "Mistral Small"
-  if (name.includes("mistral")) return "Mistral"
-  if (name.includes("deepseek-r1")) return "DeepSeek R1"
-  if (name.includes("deepseek-v3")) return "DeepSeek V3"
-  if (name.includes("deepseek")) return "DeepSeek"
-  if (name.includes("nova-pro")) return "Nova Pro"
-  if (name.includes("nova-lite")) return "Nova Lite"
-  if (name.includes("command-r-plus")) return "Command R+"
-  if (name.includes("command-a")) return "Command A"
-
-  // Fallback: capitalize and clean up
+  
   return name
     .replace(/-/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
-    .slice(0, 20)
 }

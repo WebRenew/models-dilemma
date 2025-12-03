@@ -11,8 +11,8 @@ const SCENARIOS = ["overt", "sales", "research", "creator"] as const;
 type Scenario = (typeof SCENARIOS)[number];
 type CloakedScenario = "sales" | "research" | "creator";
 
-const DELAY_BETWEEN_GAMES_MS = 45_000; // 45 seconds between games
-const DELAY_BETWEEN_ROUNDS_MS = 2_000; // 2 seconds between rounds for live streaming
+const DELAY_BETWEEN_GAMES_MS = 90_000; // 90 seconds between games (rate limit protection)
+const DELAY_BETWEEN_ROUNDS_MS = 5_000; // 5 seconds between rounds for live streaming
 const STREAMER_DURATION_HOURS = 4;
 const STREAMER_DURATION_MS = STREAMER_DURATION_HOURS * 60 * 60 * 1000;
 

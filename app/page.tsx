@@ -133,7 +133,9 @@ export default function Home() {
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <Button
-                onClick={() => setWhitepaperOpen(true)}
+                onClick={() => {
+                  document.getElementById("experiment-design")?.scrollIntoView({ behavior: "smooth" })
+                }}
                 variant="outline"
                 className="font-mono text-xs sm:text-sm uppercase tracking-wider border-white/15 bg-transparent text-white hover:bg-white/5 px-4 sm:px-6 py-4 sm:py-5"
               >

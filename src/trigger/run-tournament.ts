@@ -72,6 +72,14 @@ export const scheduledTournament = schedules.task({
         reason: "APP_URL not configured - add your Vercel URL to Trigger.dev env vars",
       };
     }
+    
+    // Log the URL we're going to use for debugging
+    logger.info("API Configuration", { 
+      baseUrl,
+      fullUrl: `${baseUrl}/api/run-match`,
+      appUrlEnv: process.env.APP_URL ? "set" : "not set",
+      vercelUrlEnv: process.env.VERCEL_URL ? "set" : "not set",
+    });
 
     const results: {
       success: boolean;
@@ -157,7 +165,14 @@ export const scheduledTournament = schedules.task({
           throw new Error("No completion event received");
         }
       } catch (error) {
-        logger.error(`Game ${i + 1} failed`, { error: String(error), scenario });
+        const errorDetails = error instanceof Error 
+          ? { message: error.message, name: error.name, cause: String(error.cause) }
+          : { raw: String(error) };
+        logger.error(`Game ${i + 1} failed`, { 
+          ...errorDetails,
+          scenario,
+          attemptedUrl: `${baseUrl}/api/run-match`,
+        });
         results.push({
           success: false,
           scenario,

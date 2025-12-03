@@ -311,11 +311,88 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
     onLiveMatchCountChange?.(liveMatches.length)
   }, [liveMatches.length, onLiveMatchCountChange])
 
-  // Poll for live match updates every 1 second
+  // Poll for live match updates every 1 second as fallback
   useEffect(() => {
     const liveInterval = setInterval(fetchLiveMatches, 1000)
     return () => clearInterval(liveInterval)
   }, [])
+
+  // Subscribe to realtime updates for matches and rounds
+  useEffect(() => {
+    const supabase = createClient()
+    
+    // Subscribe to match changes (new matches starting, status changes)
+    const matchesChannel = supabase
+      .channel('matches-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'matches',
+        },
+        (payload) => {
+          console.log('[Realtime] Match change:', payload.eventType)
+          // Refresh live matches on any match change
+          fetchLiveMatches()
+        }
+      )
+      .subscribe()
+
+    // Subscribe to round changes (new rounds being played)
+    const roundsChannel = supabase
+      .channel('rounds-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'rounds',
+        },
+        (payload) => {
+          console.log('[Realtime] New round:', payload.new)
+          // Refresh live matches when a new round is inserted
+          fetchLiveMatches()
+        }
+      )
+      .subscribe()
+
+    // Subscribe to game_rounds for completed games
+    const gameRoundsChannel = supabase
+      .channel('game-rounds-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'game_rounds',
+          filter: 'is_final_round=eq.true',
+        },
+        async () => {
+          console.log('[Realtime] Game completed')
+          // Fetch new completed games
+          const newGames = await fetchNewGames(lastFetchTimeRef.current - 5000)
+          const trulyNewGames = newGames.filter((g) => !seenGameIdsRef.current.has(g.id))
+          
+          if (trulyNewGames.length > 0) {
+            trulyNewGames.forEach((g) => seenGameIdsRef.current.add(g.id))
+            setDbGames((prev) => {
+              const combined = [...trulyNewGames, ...prev]
+              return combined.slice(0, 100)
+            })
+            trulyNewGames.forEach((g) => onNewGame?.(g))
+            lastFetchTimeRef.current = Date.now()
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(matchesChannel)
+      supabase.removeChannel(roundsChannel)
+      supabase.removeChannel(gameRoundsChannel)
+    }
+  }, [onNewGame])
 
   return (
     <div ref={containerRef} className="h-full overflow-y-auto scrollbar-hide px-2 sm:px-4 lg:px-6">

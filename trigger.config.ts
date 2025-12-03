@@ -1,7 +1,7 @@
 import { defineConfig } from "@trigger.dev/sdk/v3";
 
 export default defineConfig({
-  project: "proj_models-dilemma",
+  project: "proj_umahaiggmgazqnejfved",
   runtime: "node",
   logLevel: "log",
   maxDuration: 3600, // 1 hour max for long tournaments
@@ -15,6 +15,6 @@ export default defineConfig({
       randomize: true,
     },
   },
-  dirs: ["trigger"],
+  dirs: ["src/trigger"],
 });
 

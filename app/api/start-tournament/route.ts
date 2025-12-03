@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { tasks } from "@trigger.dev/sdk/v3";
-import type { runTournamentTask } from "@/trigger/run-tournament";
+import type { runTournamentTask } from "@/src/trigger/run-tournament";
 
 export async function POST(request: Request) {
   try {

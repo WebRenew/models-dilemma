@@ -60,13 +60,22 @@ function PendingDot() {
   )
 }
 
-function FillingDot({ isNext }: { isNext: boolean }) {
+function FillingDot({ isNext, index = 0, stagger = false }: { isNext: boolean; index?: number; stagger?: boolean }) {
   return (
     <motion.div
+      initial={stagger ? { scale: 0, opacity: 0 } : false}
       animate={isNext ? { 
+        scale: 1,
+        opacity: 1,
         borderColor: ["rgba(255,255,255,0.3)", "rgba(255,255,255,0.8)", "rgba(255,255,255,0.3)"],
-      } : {}}
-      transition={{ duration: 1.2, repeat: Infinity }}
+      } : { scale: 1, opacity: 1 }}
+      transition={stagger ? {
+        delay: index * 0.05,
+        duration: 0.3,
+        borderColor: isNext ? { duration: 1.2, repeat: Infinity } : undefined,
+      } : {
+        borderColor: isNext ? { duration: 1.2, repeat: Infinity } : undefined,
+      }}
       className="w-3 h-3 rounded-full border border-white/30 bg-transparent"
     />
   )
@@ -83,22 +92,35 @@ function getRoundWinner(agent1Decision: Decision | string, agent2Decision: Decis
 function LiveMatchRow({ match }: { match: LiveMatch }) {
   const scenarioLabel = match.scenario ? `[${match.scenario.slice(0, 1).toUpperCase()}]` : "[O]"
   const pendingRounds = match.totalRounds - match.rounds.length
+  const isStarting = match.rounds.length === 0
+  const currentRound = match.currentRound || match.rounds.length
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: -20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 300, damping: 25 }}
       className="flex flex-col gap-2 py-4 border-l-2 border-emerald-500 pl-2 sm:pl-4 -ml-2 sm:-ml-4 bg-emerald-500/5"
     >
       {/* Status indicator */}
       <div className="flex items-center gap-2 mb-1">
         <motion.div
-          animate={{ scale: [1, 1.2, 1] }}
-          transition={{ duration: 1, repeat: Infinity }}
+          animate={{ scale: [1, 1.3, 1], opacity: [1, 0.7, 1] }}
+          transition={{ duration: 1.2, repeat: Infinity }}
           className="w-2 h-2 rounded-full bg-emerald-500"
         />
         <span className="text-emerald-400 font-mono text-[10px] uppercase tracking-wider">
-          Live • Round {match.currentRound}/{match.totalRounds}
+          {isStarting ? (
+            <motion.span
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.3 }}
+            >
+              Starting match...
+            </motion.span>
+          ) : (
+            `Live • Round ${currentRound}/${match.totalRounds}`
+          )}
         </span>
         <span className="font-mono text-[10px] text-white/40 ml-auto">{scenarioLabel}</span>
       </div>
@@ -125,7 +147,12 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             )
           })}
           {Array.from({ length: pendingRounds }).map((_, i) => (
-            <FillingDot key={`pending-${i}`} isNext={i === 0} />
+            <FillingDot 
+              key={`pending-${i}`} 
+              isNext={i === 0} 
+              index={match.rounds.length + i}
+              stagger={isStarting}
+            />
           ))}
         </div>
         <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreA}</span>
@@ -153,7 +180,12 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             )
           })}
           {Array.from({ length: pendingRounds }).map((_, i) => (
-            <FillingDot key={`pending-${i}`} isNext={i === 0} />
+            <FillingDot 
+              key={`pending-${i}`} 
+              isNext={i === 0}
+              index={match.rounds.length + i}
+              stagger={isStarting}
+            />
           ))}
         </div>
         <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreB}</span>

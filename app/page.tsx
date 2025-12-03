@@ -22,6 +22,7 @@ export default function Home() {
   const [whitepaperOpen, setWhitepaperOpen] = useState(false)
   const [playGameOpen, setPlayGameOpen] = useState(false)
   const [liveMatchCount, setLiveMatchCount] = useState(0)
+  const [showBanner, setShowBanner] = useState(true)
 
   const [dbStats, setDbStats] = useState({ totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 })
   const [dbRankings, setDbRankings] = useState<
@@ -102,12 +103,24 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Status Banner */}
-      <div className="bg-amber-900/30 border-b border-amber-500/20 px-4 py-2">
-        <p className="text-center text-amber-200/80 text-xs sm:text-sm font-mono">
-          <span className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-2 animate-pulse" />
-          Monitoring issue with <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">deepseek/deepseek-v3.2-thinking</code> — temporarily removed from games, will re-enable when resolved
-        </p>
-      </div>
+      {showBanner && (
+        <div className="bg-amber-900/30 border-b border-amber-500/20 px-4 py-2 relative">
+          <p className="text-center text-amber-200/80 text-xs sm:text-sm font-mono pr-8">
+            <span className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-2 animate-pulse" />
+            Monitoring issue with <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">deepseek/deepseek-v3.2-thinking</code> — temporarily removed from games
+          </p>
+          <button
+            onClick={() => setShowBanner(false)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-200/60 hover:text-amber-200 transition-colors p-1"
+            aria-label="Dismiss banner"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      )}
 
       <header className="relative top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6">
         <div className="font-mono text-xs sm:text-sm tracking-wider flex items-center gap-4">

@@ -131,15 +131,6 @@ export default function ModelExplorerPage() {
     independent: m.creatorDefections,
   }))
 
-  const errorsData = models
-    .filter((m) => m.errors > 0 || m.gamesPlayed > 0)
-    .map((m) => ({
-      name: formatModelName(m.modelId),
-      modelId: m.modelId,
-      errors: m.errors,
-      errorRate: m.totalMoves > 0 ? Math.round((m.errors / m.totalMoves) * 100) : 0,
-    }))
-
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -430,36 +421,6 @@ export default function ModelExplorerPage() {
                 </div>
               </TabsContent>
             </Tabs>
-          </div>
-        </section>
-
-        {/* Model Errors */}
-        <section>
-          <h2 className="font-mono text-lg sm:text-xl mb-2">Model Errors</h2>
-          <p className="text-white/50 text-xs sm:text-sm mb-4">Failed responses and format violations by model</p>
-          <div className="bg-white/5 rounded-lg p-3 sm:p-6 border border-white/10 overflow-x-auto">
-            <div className="min-w-[400px]">
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={errorsData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                  <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    width={120}
-                    stroke="rgba(255,255,255,0.5)"
-                    tick={{ fontSize: 10, fontFamily: "monospace" }}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="errors" name="Errors" fill="oklch(77.21% .1991 64.28)">
-                    {errorsData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={getModelColor(entry.modelId)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
           </div>
         </section>
 

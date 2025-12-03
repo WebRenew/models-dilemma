@@ -161,7 +161,6 @@ export async function POST(req: Request) {
     const { text } = await generateText({
       model: gateway(modelToUse),
       prompt,
-      maxTokens: 1000,
     })
 
     const { decision, rawAction } = parseResponse(text, scenarioToUse)

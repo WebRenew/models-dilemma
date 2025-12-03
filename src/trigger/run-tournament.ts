@@ -503,15 +503,24 @@ export const continuousStreamer = schedules.task({
   run: async () => {
     const runId = crypto.randomUUID();
     
-    logger.info("Continuous streamer starting", { runId });
+    logger.info("🚀 Continuous streamer initializing", { 
+      runId: runId.slice(0, 8),
+      durationHours: STREAMER_DURATION_HOURS,
+      delayBetweenGames: `${DELAY_BETWEEN_GAMES_MS / 1000}s`,
+      delayBetweenRounds: `${DELAY_BETWEEN_ROUNDS_MS / 1000}s`,
+      modelCount: AI_MODELS.length,
+      scenarios: SCENARIOS.join(", "),
+    });
 
+    logger.info("🔍 Checking for active streamers...");
     if (await isStreamerActive()) {
-      logger.info("Another streamer active, skipping");
+      logger.warn("⚠️ Another streamer is active, skipping this run");
       return { skipped: true, reason: "Another streamer running" };
     }
+    logger.info("✅ No active streamer found, proceeding");
 
     await setStreamerState(true, runId);
-    logger.info("Streamer activated");
+    logger.info("🟢 Streamer state set to ACTIVE", { runId: runId.slice(0, 8) });
 
     const startTime = Date.now();
     let gamesPlayed = 0;
@@ -519,6 +528,20 @@ export const continuousStreamer = schedules.task({
     let failed = 0;
     
     const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
+
+    const formatElapsed = () => {
+      const elapsed = Date.now() - startTime;
+      const minutes = Math.floor(elapsed / 60000);
+      const seconds = Math.floor((elapsed % 60000) / 1000);
+      return `${minutes}m ${seconds}s`;
+    };
+
+    const formatRemaining = () => {
+      const remaining = STREAMER_DURATION_MS - (Date.now() - startTime);
+      const hours = Math.floor(remaining / 3600000);
+      const minutes = Math.floor((remaining % 3600000) / 60000);
+      return `${hours}h ${minutes}m`;
+    };
 
     try {
       while (Date.now() - startTime < STREAMER_DURATION_MS) {
@@ -529,45 +552,105 @@ export const continuousStreamer = schedules.task({
           modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
         }
 
-        // Pick scenario with lowest count
+        // Pick scenario with lowest count for balance
         const scenario = SCENARIOS.reduce((min, s) => 
           scenarioCounts[s] < scenarioCounts[min] ? s : min
         , SCENARIOS[0]);
 
         gamesPlayed++;
-        logger.info(`Game ${gamesPlayed} starting`, { modelA, modelB, scenario });
+        
+        // Short model names for logging
+        const shortA = modelA.split("/")[1] || modelA;
+        const shortB = modelB.split("/")[1] || modelB;
+        
+        logger.info(`🎮 [Game ${gamesPlayed}] Starting`, { 
+          modelA: shortA, 
+          modelB: shortB, 
+          scenario,
+          elapsed: formatElapsed(),
+          remaining: formatRemaining(),
+        });
 
+        const gameStartTime = Date.now();
         const result = await runGame(modelA, modelB, scenario);
+        const gameDuration = ((Date.now() - gameStartTime) / 1000).toFixed(1);
         scenarioCounts[scenario]++;
 
         if (result.success) {
           successful++;
-          logger.info(`Game ${gamesPlayed} complete`, { 
-            gameId: result.gameId, 
-            score: `${result.scoreA}-${result.scoreB}` 
+          const winner = result.scoreA! > result.scoreB! 
+            ? shortA 
+            : result.scoreB! > result.scoreA! 
+              ? shortB 
+              : "TIE";
+          logger.info(`✅ [Game ${gamesPlayed}] Complete`, { 
+            gameId: result.gameId?.slice(0, 8),
+            score: `${result.scoreA}-${result.scoreB}`,
+            winner,
+            duration: `${gameDuration}s`,
+            stats: `${successful}W/${failed}F`,
           });
         } else {
           failed++;
-          logger.error(`Game ${gamesPlayed} failed`, { error: result.error });
+          logger.error(`❌ [Game ${gamesPlayed}] Failed`, { 
+            error: result.error,
+            duration: `${gameDuration}s`,
+            stats: `${successful}W/${failed}F`,
+          });
+        }
+
+        // Log summary every 5 games
+        if (gamesPlayed % 5 === 0) {
+          logger.info(`📊 Progress Report`, {
+            gamesPlayed,
+            successful,
+            failed,
+            successRate: `${((successful / gamesPlayed) * 100).toFixed(1)}%`,
+            scenarioCounts,
+            elapsed: formatElapsed(),
+            remaining: formatRemaining(),
+          });
         }
 
         // Update state periodically
         if (gamesPlayed % 10 === 0) {
           await setStreamerState(true, runId);
+          logger.info("🔄 Streamer state refreshed");
         }
 
         // Wait between games
         const remaining = STREAMER_DURATION_MS - (Date.now() - startTime);
         if (remaining > DELAY_BETWEEN_GAMES_MS) {
-          logger.info("Waiting 45s...");
+          logger.info(`⏳ Waiting ${DELAY_BETWEEN_GAMES_MS / 1000}s before next game...`);
           await new Promise(r => setTimeout(r, DELAY_BETWEEN_GAMES_MS));
-        } else break;
+        } else {
+          logger.info("⏰ Time limit approaching, ending streamer");
+          break;
+        }
       }
 
+      logger.info("🏁 Streamer session complete", {
+        totalGames: gamesPlayed,
+        successful,
+        failed,
+        successRate: gamesPlayed > 0 ? `${((successful / gamesPlayed) * 100).toFixed(1)}%` : "N/A",
+        scenarioCounts,
+        totalDuration: formatElapsed(),
+      });
+
       return { skipped: false, gamesPlayed, successful, failed, scenarioCounts };
+    } catch (error) {
+      logger.error("💥 Streamer crashed", { 
+        error: error instanceof Error ? error.message : String(error),
+        gamesPlayed,
+        successful,
+        failed,
+        elapsed: formatElapsed(),
+      });
+      throw error;
     } finally {
       await setStreamerState(false);
-      logger.info("Streamer deactivated");
+      logger.info("🔴 Streamer state set to INACTIVE");
     }
   },
 });
@@ -581,8 +664,14 @@ export const runTournamentTask = task({
     const forcedModelA = payload.modelA;
     const forcedModelB = payload.modelB;
     
-    logger.info("Manual tournament", { gamesToRun, forcedScenario, forcedModelA, forcedModelB });
+    logger.info("🏆 Manual tournament starting", { 
+      gamesToRun, 
+      forcedScenario: forcedScenario || "random",
+      forcedModelA: forcedModelA || "random", 
+      forcedModelB: forcedModelB || "random",
+    });
 
+    const startTime = Date.now();
     let successful = 0, failed = 0;
     const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
 
@@ -599,14 +688,44 @@ export const runTournamentTask = task({
         scenarioCounts[s] < scenarioCounts[min] ? s : min
       , SCENARIOS[0]);
 
-      logger.info(`Game ${i + 1}/${gamesToRun}`, { modelA, modelB, scenario });
+      const shortA = modelA.split("/")[1] || modelA;
+      const shortB = modelB.split("/")[1] || modelB;
 
+      logger.info(`🎮 [${i + 1}/${gamesToRun}] Starting game`, { 
+        modelA: shortA, 
+        modelB: shortB, 
+        scenario 
+      });
+
+      const gameStart = Date.now();
       const result = await runGame(modelA, modelB, scenario);
+      const gameDuration = ((Date.now() - gameStart) / 1000).toFixed(1);
       scenarioCounts[scenario]++;
 
-      if (result.success) successful++;
-      else failed++;
+      if (result.success) {
+        successful++;
+        logger.info(`✅ [${i + 1}/${gamesToRun}] Complete`, {
+          score: `${result.scoreA}-${result.scoreB}`,
+          duration: `${gameDuration}s`,
+        });
+      } else {
+        failed++;
+        logger.error(`❌ [${i + 1}/${gamesToRun}] Failed`, { 
+          error: result.error,
+          duration: `${gameDuration}s`,
+        });
+      }
     }
+
+    const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
+    logger.info("🏁 Tournament complete", {
+      totalGames: gamesToRun,
+      successful,
+      failed,
+      successRate: `${((successful / gamesToRun) * 100).toFixed(1)}%`,
+      scenarioCounts,
+      totalDuration: `${totalDuration}s`,
+    });
 
     return { successful, failed, scenarioCounts };
   },

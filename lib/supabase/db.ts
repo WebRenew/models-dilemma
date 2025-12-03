@@ -9,17 +9,17 @@ export interface GameRoundRow {
   total_rounds: number
   agent1_model_id: string
   agent1_display_name: string
-  agent1_decision: "cooperate" | "defect"
+  agent1_decision: "cooperate" | "defect" | "error"
   agent1_reasoning: string | null
   agent1_round_points: number
   agent1_cumulative_score: number
   agent2_model_id: string
   agent2_display_name: string
-  agent2_decision: "cooperate" | "defect"
+  agent2_decision: "cooperate" | "defect" | "error"
   agent2_reasoning: string | null
   agent2_round_points: number
   agent2_cumulative_score: number
-  round_outcome: "mutual_cooperation" | "mutual_defection" | "agent1_exploited" | "agent2_exploited"
+  round_outcome: "mutual_cooperation" | "mutual_defection" | "agent1_exploited" | "agent2_exploited" | "error"
   game_type: "control" | "hidden_agenda"
   game_source?: "user" | "automated"
   game_winner: "agent1" | "agent2" | "tie" | null
@@ -28,9 +28,10 @@ export interface GameRoundRow {
 }
 
 function getRoundOutcome(
-  agent1Decision: "cooperate" | "defect",
-  agent2Decision: "cooperate" | "defect",
-): "mutual_cooperation" | "mutual_defection" | "agent1_exploited" | "agent2_exploited" {
+  agent1Decision: "cooperate" | "defect" | "error",
+  agent2Decision: "cooperate" | "defect" | "error",
+): "mutual_cooperation" | "mutual_defection" | "agent1_exploited" | "agent2_exploited" | "error" {
+  if (agent1Decision === "error" || agent2Decision === "error") return "error"
   if (agent1Decision === "cooperate" && agent2Decision === "cooperate") return "mutual_cooperation"
   if (agent1Decision === "defect" && agent2Decision === "defect") return "mutual_defection"
   if (agent1Decision === "cooperate" && agent2Decision === "defect") return "agent1_exploited"

@@ -17,9 +17,10 @@ function getRandomModel(): string {
 }
 
 function getRoundOutcome(
-  agent1Decision: "cooperate" | "defect",
-  agent2Decision: "cooperate" | "defect",
-): "mutual_cooperation" | "mutual_defection" | "agent1_exploited" | "agent2_exploited" {
+  agent1Decision: "cooperate" | "defect" | "error",
+  agent2Decision: "cooperate" | "defect" | "error",
+): "mutual_cooperation" | "mutual_defection" | "agent1_exploited" | "agent2_exploited" | "error" {
+  if (agent1Decision === "error" || agent2Decision === "error") return "error"
   if (agent1Decision === "cooperate" && agent2Decision === "cooperate") return "mutual_cooperation"
   if (agent1Decision === "defect" && agent2Decision === "defect") return "mutual_defection"
   if (agent1Decision === "cooperate" && agent2Decision === "defect") return "agent1_exploited"

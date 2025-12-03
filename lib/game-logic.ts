@@ -1,4 +1,4 @@
-export type Decision = "cooperate" | "defect"
+export type Decision = "cooperate" | "defect" | "error"
 
 export interface RoundResult {
   round: number

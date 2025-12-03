@@ -138,8 +138,8 @@ export const continuousStreamer = schedules.task({
   id: "continuous-streamer",
   cron: "0 */4 * * *", // Every 4 hours
   maxDuration: 14400, // 4 hours max
-  run: async (payload) => {
-    const runId = payload.externalId || crypto.randomUUID();
+  run: async () => {
+    const runId = crypto.randomUUID();
     
     logger.info("Continuous streamer starting", { runId });
 

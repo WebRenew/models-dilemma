@@ -7,6 +7,7 @@ interface RankingEntry {
   rank: number
   modelId: string
   wins: number
+  losses: number
 }
 
 interface RankingsCardProps {
@@ -25,7 +26,7 @@ export function RankingsCard({ rankings, onExport }: RankingsCardProps) {
             return (
               <div 
                 key={entry.rank} 
-                className={`font-mono text-xs sm:text-sm flex ${
+                className={`font-mono text-xs sm:text-sm flex items-center ${
                   isDisabled 
                     ? "bg-amber-900/30 text-amber-200/80 px-1.5 py-0.5 -mx-1.5 rounded" 
                     : "text-white/80"
@@ -34,7 +35,11 @@ export function RankingsCard({ rankings, onExport }: RankingsCardProps) {
                 <span className={`w-4 sm:w-5 shrink-0 ${isDisabled ? "text-amber-200/60" : "text-white/50"}`}>
                   {entry.rank}
                 </span>
-                <span className="truncate">{entry.modelId}</span>
+                <span className="truncate flex-1">{entry.modelId}</span>
+                <span className="flex gap-1.5 ml-2 shrink-0">
+                  <span className="text-[#4ade80]">{entry.wins}W</span>
+                  <span className="text-[#f87171]">{entry.losses}L</span>
+                </span>
               </div>
             )
           })}

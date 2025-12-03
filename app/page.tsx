@@ -64,7 +64,8 @@ export default function Home() {
   const rankings = dbRankings.map((r, i) => ({
     rank: i + 1,
     modelId: r.modelId,
-    wins: r.totalPoints,
+    wins: r.wins,
+    losses: r.losses,
   }))
 
   const handleGameComplete = useCallback(

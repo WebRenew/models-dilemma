@@ -182,10 +182,16 @@ export async function fetchModelRankings(limit = 10) {
       displayName: string
       totalPoints: number
       gamesPlayed: number
+      wins: number
+      losses: number
     }
   > = {}
 
   for (const round of finalRounds) {
+    // Determine winner
+    const agent1Won = round.game_winner === "agent1"
+    const agent2Won = round.game_winner === "agent2"
+
     // Agent 1 stats
     if (!modelStats[round.agent1_model_id]) {
       modelStats[round.agent1_model_id] = {
@@ -193,10 +199,14 @@ export async function fetchModelRankings(limit = 10) {
         displayName: round.agent1_display_name,
         totalPoints: 0,
         gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
       }
     }
     modelStats[round.agent1_model_id].totalPoints += round.agent1_cumulative_score
     modelStats[round.agent1_model_id].gamesPlayed += 1
+    if (agent1Won) modelStats[round.agent1_model_id].wins += 1
+    if (agent2Won) modelStats[round.agent1_model_id].losses += 1
 
     // Agent 2 stats
     if (!modelStats[round.agent2_model_id]) {
@@ -205,10 +215,14 @@ export async function fetchModelRankings(limit = 10) {
         displayName: round.agent2_display_name,
         totalPoints: 0,
         gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
       }
     }
     modelStats[round.agent2_model_id].totalPoints += round.agent2_cumulative_score
     modelStats[round.agent2_model_id].gamesPlayed += 1
+    if (agent2Won) modelStats[round.agent2_model_id].wins += 1
+    if (agent1Won) modelStats[round.agent2_model_id].losses += 1
   }
 
   return Object.values(modelStats)

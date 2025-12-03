@@ -16,11 +16,14 @@ import type { GameRecord } from "@/lib/game-logic"
 import { MODEL_COUNT } from "@/lib/models"
 import { fetchGameStats, fetchModelRankings, exportGameDataCSV, fetchStrategyStats } from "@/lib/supabase/db"
 import Link from "next/link"
+import { Play, Loader2 } from "lucide-react"
 
 export default function Home() {
   const [userGames, setUserGames] = useState<GameRecord[]>([])
   const [whitepaperOpen, setWhitepaperOpen] = useState(false)
   const [playGameOpen, setPlayGameOpen] = useState(false)
+  const [tournamentRunning, setTournamentRunning] = useState(false)
+  const [tournamentStatus, setTournamentStatus] = useState<string | null>(null)
 
   const [dbStats, setDbStats] = useState({ totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 })
   const [dbRankings, setDbRankings] = useState<
@@ -94,6 +97,41 @@ export default function Home() {
     URL.revokeObjectURL(url)
   }, [])
 
+  const startTournament = useCallback(async () => {
+    if (tournamentRunning) return
+    
+    setTournamentRunning(true)
+    setTournamentStatus("Starting tournament...")
+    
+    try {
+      const response = await fetch("/api/start-tournament", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matchesPerScenario: 25,
+          totalRounds: 10,
+        }),
+      })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        setTournamentStatus(`Tournament started! ${data.totalMatches} matches queued.`)
+        // Keep running state for a bit then reset
+        setTimeout(() => {
+          setTournamentRunning(false)
+          setTournamentStatus(null)
+        }, 5000)
+      } else {
+        throw new Error(data.error || "Failed to start tournament")
+      }
+    } catch (error) {
+      setTournamentStatus(`Error: ${error}`)
+      setTournamentRunning(false)
+      setTimeout(() => setTournamentStatus(null), 5000)
+    }
+  }, [tournamentRunning])
+
   return (
     <div className="min-h-screen bg-black text-white">
       <header className="relative top-0 left-0 right-0 z-40 flex items-center justify-between px-8 py-6">
@@ -107,6 +145,27 @@ export default function Home() {
           >
             Model Explorer
           </Link>
+          <Button
+            onClick={startTournament}
+            disabled={tournamentRunning}
+            size="sm"
+            className="font-mono text-xs uppercase tracking-wider bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/50 disabled:opacity-50"
+          >
+            {tournamentRunning ? (
+              <>
+                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                Running...
+              </>
+            ) : (
+              <>
+                <Play className="h-3 w-3 mr-2" />
+                Run Tournament
+              </>
+            )}
+          </Button>
+          {tournamentStatus && (
+            <span className="font-mono text-xs text-emerald-400/80">{tournamentStatus}</span>
+          )}
         </div>
       </header>
 

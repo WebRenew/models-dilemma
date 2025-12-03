@@ -119,6 +119,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
         const score1 = previousRounds.reduce((sum, r) => sum + r.agent1Points, 0)
         const score2 = previousRounds.reduce((sum, r) => sum + r.agent2Points, 0)
 
+        console.log("[PlayGame] Round", roundNumber, "scenario:", scenario, "models:", agent1Model, agent2Model)
+
         // Start both requests
         const [agent1Response, agent2Response] = await Promise.all([
           fetch("/api/agent-decision", {
@@ -250,7 +252,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
 
       // Save round to database immediately (so it appears in live feed)
       try {
-        await fetch("/api/save-round", {
+        console.log("[PlayGame] Saving round:", { round, scenario, gameId: gameId.slice(0, 12) })
+        const saveResponse = await fetch("/api/save-round", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -275,8 +278,12 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
             winner,
           }),
         })
+        const saveResult = await saveResponse.json()
+        if (!saveResult.success) {
+          console.error("[PlayGame] Failed to save round:", saveResult.error)
+        }
       } catch (e) {
-        console.error("Failed to save round:", e)
+        console.error("[PlayGame] Failed to save round:", e)
       }
 
       // Longer pause between rounds so users can read agent reasoning

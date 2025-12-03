@@ -140,16 +140,6 @@ export default function ModelExplorerPage() {
       errorRate: m.totalMoves > 0 ? Math.round((m.errors / m.totalMoves) * 100) : 0,
     }))
 
-  const tokensData = models.map((m) => ({
-    name: formatModelName(m.modelId),
-    modelId: m.modelId,
-    tokensTotal: m.tokensIn + m.tokensOut,
-    gamesPlayed: m.gamesPlayed,
-    tokensPerGame: m.gamesPlayed > 0 ? Math.round((m.tokensIn + m.tokensOut) / m.gamesPlayed) : 0,
-  }))
-
-  const hasTokenData = tokensData.some((t) => t.tokensTotal > 0)
-
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -473,46 +463,6 @@ export default function ModelExplorerPage() {
           </div>
         </section>
 
-        {/* Tokens Consumed vs Games Played */}
-        <section>
-          <h2 className="font-mono text-lg sm:text-xl mb-2">Reasoning Effort</h2>
-          <p className="text-white/50 text-xs sm:text-sm mb-4">
-            Tokens consumed per game (higher may indicate deeper reasoning)
-          </p>
-          <div className="bg-white/5 rounded-lg p-3 sm:p-6 border border-white/10 overflow-x-auto">
-            {hasTokenData ? (
-              <div className="min-w-[400px]">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={tokensData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis type="number" stroke="rgba(255,255,255,0.5)" tick={{ fontSize: 10 }} />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={120}
-                      stroke="rgba(255,255,255,0.5)"
-                      tick={{ fontSize: 10, fontFamily: "monospace" }}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="tokensPerGame" name="Tokens/Game" fill="oklch(57.61% .2321 258.23)">
-                      {tokensData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={getModelColor(entry.modelId)} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <p className="font-mono text-white/50 text-sm mb-2">Token usage data not available</p>
-                <p className="text-white/30 text-xs max-w-md">
-                  The AI Gateway does not currently report token usage metrics for these models.
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
       </main>
     </div>
   )

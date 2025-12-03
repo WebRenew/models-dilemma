@@ -24,7 +24,7 @@ const AI_MODELS = [
   "google/gemini-3-pro-preview",
   "perplexity/sonar-pro",
   "moonshotai/kimi-k2-thinking-turbo",
-  "deepseek/deepseek-v3.2-thinking",
+  // "deepseek/deepseek-v3.2-thinking", // Disabled 2025-12-03: AI Gateway consistently failing
 ];
 
 // =============================================================================

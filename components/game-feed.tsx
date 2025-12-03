@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client"
 interface GameFeedProps {
   userGames?: GameRecord[]
   onNewGame?: (game: GameRecord) => void
+  onLiveMatchCountChange?: (count: number) => void
 }
 
 interface LiveMatch {
@@ -197,7 +198,7 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
   )
 }
 
-export function GameFeed({ userGames = [], onNewGame }: GameFeedProps) {
+export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: GameFeedProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dbGames, setDbGames] = useState<GameRecord[]>([])
   const [liveMatches, setLiveMatches] = useState<LiveMatch[]>([])
@@ -303,6 +304,11 @@ export function GameFeed({ userGames = [], onNewGame }: GameFeedProps) {
 
     return () => clearInterval(pollInterval)
   }, [onNewGame])
+
+  // Notify parent of live match count changes
+  useEffect(() => {
+    onLiveMatchCountChange?.(liveMatches.length)
+  }, [liveMatches.length, onLiveMatchCountChange])
 
   // Poll for live match updates every 1 second
   useEffect(() => {

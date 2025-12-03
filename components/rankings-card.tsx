@@ -21,28 +21,21 @@ export function RankingsCard({ rankings, onExport }: RankingsCardProps) {
       <div>
         <p className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50 mb-2 sm:mb-3">Rankings</p>
         <div className="space-y-1 sm:space-y-1.5">
-          {rankings.slice(0, 10).map((entry) => {
-            const isDisabled = entry.modelId.includes("deepseek")
-            return (
-              <div 
-                key={entry.rank} 
-                className={`font-mono text-xs sm:text-sm flex items-center ${
-                  isDisabled 
-                    ? "bg-[#2a1700] text-[#ff9300] px-1.5 py-0.5 -mx-1.5 rounded" 
-                    : "text-white/80"
-                }`}
-              >
-                <span className={`w-4 sm:w-5 shrink-0 ${isDisabled ? "text-[#ff9300]/60" : "text-white/50"}`}>
-                  {entry.rank}
-                </span>
-                <span className="truncate flex-1">{entry.modelId}</span>
-                <span className="flex gap-1.5 ml-2 shrink-0">
-                  <span className={isDisabled ? "text-[#ff9300]" : "text-[#4ade80]"}>{entry.wins}W</span>
-                  <span className={isDisabled ? "text-[#ff9300]/70" : "text-[#f87171]"}>{entry.losses}L</span>
-                </span>
-              </div>
-            )
-          })}
+          {rankings.slice(0, 10).map((entry) => (
+            <div 
+              key={entry.rank} 
+              className="font-mono text-xs sm:text-sm flex items-center text-white/80"
+            >
+              <span className="w-4 sm:w-5 shrink-0 text-white/50">
+                {entry.rank}
+              </span>
+              <span className="truncate flex-1">{entry.modelId}</span>
+              <span className="flex gap-1.5 ml-2 shrink-0">
+                <span className="text-[#4ade80]">{entry.wins}W</span>
+                <span className="text-[#f87171]">{entry.losses}L</span>
+              </span>
+            </div>
+          ))}
           {rankings.length === 0 && <p className="font-mono text-xs sm:text-sm text-white/50">No games yet</p>}
         </div>
       </div>

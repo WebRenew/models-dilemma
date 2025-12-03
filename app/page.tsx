@@ -22,7 +22,7 @@ export default function Home() {
   const [whitepaperOpen, setWhitepaperOpen] = useState(false)
   const [playGameOpen, setPlayGameOpen] = useState(false)
   const [liveMatchCount, setLiveMatchCount] = useState(0)
-  const [showBanner, setShowBanner] = useState(true)
+  const [showBanner, setShowBanner] = useState(false)
 
   const [dbStats, setDbStats] = useState({ totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 })
   const [dbRankings, setDbRankings] = useState<

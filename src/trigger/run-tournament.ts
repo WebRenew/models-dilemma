@@ -24,7 +24,7 @@ const AI_MODELS = [
   "google/gemini-3-pro-preview",
   "perplexity/sonar-pro",
   "moonshotai/kimi-k2-thinking-turbo",
-  // "deepseek/deepseek-v3.2-thinking", // Disabled: AI SDK error "Cannot read properties of undefined (reading 'inputTokens')"
+  "deepseek/deepseek-v3.2-thinking",
 ];
 
 // =============================================================================

@@ -56,10 +56,18 @@ function DecisionDot({ decision, isWinner }: { decision: Decision | string; isWi
 
 function PendingDot() {
   return (
+    <div className="w-3 h-3 rounded-full border border-white/30 bg-transparent" />
+  )
+}
+
+function FillingDot({ isNext }: { isNext: boolean }) {
+  return (
     <motion.div
-      animate={{ opacity: [0.3, 1, 0.3] }}
-      transition={{ duration: 1.5, repeat: Infinity }}
-      className="w-3 h-3 rounded-full bg-white/30 border border-white/50"
+      animate={isNext ? { 
+        borderColor: ["rgba(255,255,255,0.3)", "rgba(255,255,255,0.8)", "rgba(255,255,255,0.3)"],
+      } : {}}
+      transition={{ duration: 1.2, repeat: Infinity }}
+      className="w-3 h-3 rounded-full border border-white/30 bg-transparent"
     />
   )
 }
@@ -105,10 +113,19 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
         <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
           {match.rounds.map((round, i) => {
             const winner = getRoundWinner(round.actionA, round.actionB)
-            return <DecisionDot key={i} decision={round.actionA} isWinner={winner === "agent1"} />
+            return (
+              <motion.div
+                key={i}
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 500, damping: 25 }}
+              >
+                <DecisionDot decision={round.actionA} isWinner={winner === "agent1"} />
+              </motion.div>
+            )
           })}
           {Array.from({ length: pendingRounds }).map((_, i) => (
-            <PendingDot key={`pending-${i}`} />
+            <FillingDot key={`pending-${i}`} isNext={i === 0} />
           ))}
         </div>
         <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreA}</span>
@@ -124,10 +141,19 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
         <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
           {match.rounds.map((round, i) => {
             const winner = getRoundWinner(round.actionA, round.actionB)
-            return <DecisionDot key={i} decision={round.actionB} isWinner={winner === "agent2"} />
+            return (
+              <motion.div
+                key={i}
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 500, damping: 25 }}
+              >
+                <DecisionDot decision={round.actionB} isWinner={winner === "agent2"} />
+              </motion.div>
+            )
           })}
           {Array.from({ length: pendingRounds }).map((_, i) => (
-            <PendingDot key={`pending-${i}`} />
+            <FillingDot key={`pending-${i}`} isNext={i === 0} />
           ))}
         </div>
         <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreB}</span>

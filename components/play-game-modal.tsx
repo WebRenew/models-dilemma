@@ -237,32 +237,50 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
     const winner =
       runningAgent1Total > runningAgent2Total ? "agent1" : runningAgent2Total > runningAgent1Total ? "agent2" : "tie"
 
+    const gameId = `game-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const agent1DisplayName = getShortModelName(agent1Model)
+    const agent2DisplayName = getShortModelName(agent2Model)
+
     const gameRecord: GameRecord = {
-      id: `game-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: gameId,
       agent1Model,
       agent2Model,
-      agent1DisplayName: getShortModelName(agent1Model),
-      agent2DisplayName: getShortModelName(agent2Model),
+      agent1DisplayName,
+      agent2DisplayName,
       rounds: runningRounds,
       agent1TotalScore: runningAgent1Total,
       agent2TotalScore: runningAgent2Total,
       winner,
       timestamp: Date.now(),
       framing: scenario === "overt" ? "overt" : "cloaked",
-      scenario: scenario === "overt" ? null : scenario,
+      scenario: scenario === "overt" ? undefined : scenario,
     }
 
+    // Save to database
     try {
-      await fetch("/api/run-automated-game", {
+      const response = await fetch("/api/save-game", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          gameId,
           agent1Model,
           agent2Model,
-          gameSource: "user",
+          agent1DisplayName,
+          agent2DisplayName,
+          rounds: runningRounds,
+          agent1TotalScore: runningAgent1Total,
+          agent2TotalScore: runningAgent2Total,
+          winner,
           scenario,
+          gameSource: "user",
         }),
       })
+      const result = await response.json()
+      if (!result.success) {
+        console.error("Failed to save game:", result.error)
+      } else {
+        console.log("Game saved:", result.gameId, "rounds:", result.roundsSaved)
+      }
     } catch (e) {
       console.error("Failed to save user game:", e)
     }

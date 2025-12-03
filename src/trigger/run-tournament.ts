@@ -60,12 +60,18 @@ export const scheduledTournament = schedules.task({
 
     logger.info(`Starting batch of ${GAMES_PER_BATCH} games`);
 
-    // Get API base URL
-    const baseUrl = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_VERCEL_URL
-        ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
-        : "http://localhost:3000";
+    // Get API base URL - APP_URL must be set in Trigger.dev environment variables
+    const baseUrl = process.env.APP_URL 
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+      || (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : null);
+    
+    if (!baseUrl) {
+      logger.error("APP_URL environment variable not set in Trigger.dev");
+      return {
+        skipped: true,
+        reason: "APP_URL not configured - add your Vercel URL to Trigger.dev env vars",
+      };
+    }
 
     const results: {
       success: boolean;
@@ -209,12 +215,18 @@ export const runTournamentTask = task({
       }
     }
 
-    // Get API base URL
-    const baseUrl = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_VERCEL_URL
-        ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
-        : "http://localhost:3000";
+    // Get API base URL - APP_URL must be set in Trigger.dev environment variables
+    const baseUrl = process.env.APP_URL 
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+      || (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : null);
+    
+    if (!baseUrl) {
+      logger.error("APP_URL environment variable not set in Trigger.dev");
+      return {
+        skipped: true,
+        reason: "APP_URL not configured - add your Vercel URL to Trigger.dev env vars",
+      };
+    }
 
     const scenarioCounts: Record<Scenario, number> = {
       overt: 0,

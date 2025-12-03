@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "motion/react"
 import type { GameRecord, Decision } from "@/lib/game-logic"
 import { fetchRecentGames, fetchNewGames } from "@/lib/supabase/db"
 import { createClient } from "@/lib/supabase/client"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface GameFeedProps {
   userGames?: GameRecord[]
@@ -88,9 +89,40 @@ function getRoundWinner(agent1Decision: Decision | string, agent2Decision: Decis
   return "agent2"
 }
 
+function getScenarioLabel(scenario: string | null | undefined): string {
+  if (!scenario) return ""
+  if (scenario === "sales") return "S"
+  if (scenario === "research") return "R"
+  if (scenario === "creator") return "C"
+  return ""
+}
+
+function FramingIndicator({ framing, scenario }: { framing: "overt" | "cloaked" | undefined; scenario?: string | null }) {
+  const isOvert = framing !== "cloaked"
+  const scenarioLabel = getScenarioLabel(scenario)
+  
+  const tooltipText = isOvert 
+    ? "Overt: Models know they're playing Prisoner's Dilemma with explicit COOPERATE/DEFECT choices"
+    : `Cloaked: Models are given a business scenario without knowing it's Prisoner's Dilemma${scenario ? ` (${scenario === "sales" ? "Sales: SHARE/HOLD" : scenario === "research" ? "Research: OPEN/GUARDED" : "Creator: SUPPORT/INDEPENDENT"})` : ""}`
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="font-mono text-[10px] text-white/40 cursor-help">
+            {isOvert ? "[O]" : `[C${scenarioLabel ? `:${scenarioLabel}` : ""}]`}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="left" className="max-w-[250px] text-xs">
+          <p>{tooltipText}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 // Live match row - shows in-progress matches
 function LiveMatchRow({ match }: { match: LiveMatch }) {
-  const scenarioLabel = match.scenario ? `[${match.scenario.slice(0, 1).toUpperCase()}]` : "[O]"
   const pendingRounds = match.totalRounds - match.rounds.length
   const isStarting = match.rounds.length === 0
   const currentRound = match.currentRound || match.rounds.length
@@ -122,7 +154,9 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             `Live • Round ${currentRound}/${match.totalRounds}`
           )}
         </span>
-        <span className="font-mono text-[10px] text-white/40 ml-auto">{scenarioLabel}</span>
+        <span className="ml-auto">
+          <FramingIndicator framing={match.framing} scenario={match.scenario} />
+        </span>
       </div>
 
       {/* Model A row */}
@@ -196,7 +230,6 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
 
 function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
   const gameWinner = game.winner
-  const framingIndicator = game.framing === "cloaked" ? "[C]" : "[O]"
 
   return (
     <motion.div
@@ -205,9 +238,9 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
       transition={{ duration: 0.3 }}
       className="flex flex-col gap-2 py-4"
     >
-      {/* Header with framing indicator */}
+      {/* Header with framing indicator - mobile only */}
       <div className="flex items-center justify-between mb-1 sm:hidden">
-        <span className="font-mono text-[10px] text-white/40">{framingIndicator}</span>
+        <FramingIndicator framing={game.framing} scenario={game.scenario} />
       </div>
       {/* Agent 1 row */}
       <div className="flex items-center gap-2 sm:gap-4">
@@ -228,7 +261,9 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
           })}
         </div>
         <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{game.agent1TotalScore}</span>
-        <span className="font-mono text-[10px] text-white/40 w-8 hidden sm:block">{framingIndicator}</span>
+        <span className="w-10 hidden sm:block">
+          <FramingIndicator framing={game.framing} scenario={game.scenario} />
+        </span>
       </div>
       {/* Agent 2 row */}
       <div className="flex items-center gap-2 sm:gap-4">

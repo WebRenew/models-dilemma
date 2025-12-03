@@ -334,6 +334,7 @@ export async function fetchRecentGames(limit = 50): Promise<GameRecord[]> {
         winner: finalRound.game_winner || "tie",
         timestamp: new Date(finalRound.game_timestamp).getTime(),
         framing: finalRound.game_type === "hidden_agenda" ? "cloaked" : "overt",
+        scenario: finalRound.scenario || null,
       })
     }
   }
@@ -388,6 +389,7 @@ export async function fetchNewGames(afterTimestamp: number): Promise<GameRecord[
         winner: finalRound.game_winner || "tie",
         timestamp: new Date(finalRound.game_timestamp).getTime(),
         framing: finalRound.game_type === "hidden_agenda" ? "cloaked" : "overt",
+        scenario: finalRound.scenario || null,
       })
     }
   }

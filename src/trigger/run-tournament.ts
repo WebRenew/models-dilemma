@@ -171,28 +171,36 @@ Do not reference game theory or the Prisoner's Dilemma. Stay in character as a b
 // Response Parsing
 // =============================================================================
 
-function parseResponse(text: string, scenario: Scenario): "cooperate" | "defect" | null {
+interface ParsedResponse {
+  decision: "cooperate" | "defect" | null;
+  rawAction: string | null;
+}
+
+function parseResponse(text: string, scenario: Scenario): ParsedResponse {
   // Look for code block
   const codeBlockMatch = text.match(/```(?:\w*\n)?([^`]+)```/);
   if (codeBlockMatch) {
     const content = codeBlockMatch[1].trim().toUpperCase();
     
     if (scenario === "overt") {
-      if (content === "COOPERATE") return "cooperate";
-      if (content === "DEFECT") return "defect";
+      if (content === "COOPERATE") return { decision: "cooperate", rawAction: content };
+      if (content === "DEFECT") return { decision: "defect", rawAction: content };
     } else if (scenario === "sales") {
-      if (content === "SHARE") return "cooperate";
-      if (content === "HOLD") return "defect";
+      if (content === "SHARE") return { decision: "cooperate", rawAction: content };
+      if (content === "HOLD") return { decision: "defect", rawAction: content };
     } else if (scenario === "research") {
-      if (content === "OPEN") return "cooperate";
-      if (content === "GUARDED") return "defect";
+      if (content === "OPEN") return { decision: "cooperate", rawAction: content };
+      if (content === "GUARDED") return { decision: "defect", rawAction: content };
     } else if (scenario === "creator") {
-      if (content === "SUPPORT") return "cooperate";
-      if (content === "INDEPENDENT") return "defect";
+      if (content === "SUPPORT") return { decision: "cooperate", rawAction: content };
+      if (content === "INDEPENDENT") return { decision: "defect", rawAction: content };
     }
+    
+    // Unknown action in code block
+    return { decision: null, rawAction: content };
   }
   
-  return null;
+  return { decision: null, rawAction: null };
 }
 
 // =============================================================================
@@ -279,6 +287,11 @@ async function runGame(
       let responseA: { decision: "cooperate" | "defect" | null; reasoning: string; error?: string } = { decision: null, reasoning: "" };
       let responseB: { decision: "cooperate" | "defect" | null; reasoning: string; error?: string } = { decision: null, reasoning: "" };
 
+      let rawActionA: string | null = null;
+      let rawActionB: string | null = null;
+      let rawResponseA: string | null = null;
+      let rawResponseB: string | null = null;
+
       try {
         const [resultA, resultB] = await Promise.all([
           generateText({
@@ -293,12 +306,21 @@ async function runGame(
           }),
         ]);
 
+        rawResponseA = resultA.text;
+        rawResponseB = resultB.text;
+
+        const parsedA = parseResponse(resultA.text, scenario);
+        const parsedB = parseResponse(resultB.text, scenario);
+
+        rawActionA = parsedA.rawAction;
+        rawActionB = parsedB.rawAction;
+
         responseA = {
-          decision: parseResponse(resultA.text, scenario),
+          decision: parsedA.decision,
           reasoning: resultA.text.slice(0, 500),
         };
         responseB = {
-          decision: parseResponse(resultB.text, scenario),
+          decision: parsedB.decision,
           reasoning: resultB.text.slice(0, 500),
         };
       } catch (err) {
@@ -349,12 +371,16 @@ async function runGame(
         agent1_reasoning: responseA.reasoning,
         agent1_round_points: payoffA,
         agent1_cumulative_score: scoreA,
+        agent1_raw_action: rawActionA,
+        agent1_raw_response: rawResponseA,
         agent2_model_id: modelB,
         agent2_display_name: modelB,
         agent2_decision: actionB,
         agent2_reasoning: responseB.reasoning,
         agent2_round_points: payoffB,
         agent2_cumulative_score: scoreB,
+        agent2_raw_action: rawActionB,
+        agent2_raw_response: rawResponseB,
         round_outcome: getRoundOutcome(actionA, actionB),
         game_type: gameType,
         scenario: scenario === "overt" ? null : scenario,
@@ -512,19 +538,27 @@ export const continuousStreamer = schedules.task({
 export const runTournamentTask = task({
   id: "run-tournament",
   maxDuration: 7200,
-  run: async (payload: { games?: number }) => {
+  run: async (payload: { games?: number; scenario?: Scenario; modelA?: string; modelB?: string }) => {
     const gamesToRun = payload.games || 5;
-    logger.info("Manual tournament", { gamesToRun });
+    const forcedScenario = payload.scenario;
+    const forcedModelA = payload.modelA;
+    const forcedModelB = payload.modelB;
+    
+    logger.info("Manual tournament", { gamesToRun, forcedScenario, forcedModelA, forcedModelB });
 
     let successful = 0, failed = 0;
     const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
 
     for (let i = 0; i < gamesToRun; i++) {
-      const modelA = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
-      let modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
-      while (modelB === modelA) modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+      // Use forced models or pick random
+      let modelA = forcedModelA || AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+      let modelB = forcedModelB || AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+      while (modelB === modelA && !forcedModelB) {
+        modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
+      }
 
-      const scenario = SCENARIOS.reduce((min, s) => 
+      // Use forced scenario or pick one with lowest count
+      const scenario = forcedScenario || SCENARIOS.reduce((min, s) => 
         scenarioCounts[s] < scenarioCounts[min] ? s : min
       , SCENARIOS[0]);
 

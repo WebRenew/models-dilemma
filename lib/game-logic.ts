@@ -64,6 +64,7 @@ export interface GameRecord {
   winner: "agent1" | "agent2" | "tie"
   timestamp: number
   framing?: "overt" | "cloaked"
+  scenario?: "sales" | "research" | "creator" | null
 }
 
 export function getShortModelName(modelId: string): string {

@@ -15,9 +15,15 @@ function getSupabaseClient() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   
   if (!url || !key) {
+    logger.error("Missing Supabase credentials", {
+      hasUrl: !!url,
+      hasKey: !!key,
+      urlPrefix: url ? url.slice(0, 30) : "none",
+    });
     throw new Error("Missing Supabase credentials");
   }
   
+  logger.info("Creating Supabase client", { urlPrefix: url.slice(0, 30) });
   return createClient(url, key);
 }
 
@@ -50,7 +56,7 @@ async function isStreamerActive(): Promise<boolean> {
 async function setStreamerState(isActive: boolean, runId?: string): Promise<void> {
   const supabase = getSupabaseClient();
   
-  await supabase
+  const { error } = await supabase
     .from("streamer_state")
     .upsert({
       id: "singleton",
@@ -59,6 +65,12 @@ async function setStreamerState(isActive: boolean, runId?: string): Promise<void
       started_at: isActive ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
     });
+  
+  if (error) {
+    logger.error("Failed to set streamer state", { error: error.message, code: error.code });
+  } else {
+    logger.info("Streamer state updated", { isActive, runId });
+  }
 }
 
 // Get API base URL
@@ -141,7 +153,19 @@ export const continuousStreamer = schedules.task({
   run: async () => {
     const runId = crypto.randomUUID();
     
-    logger.info("Continuous streamer starting", { runId });
+    // Log env var status for debugging (redacted values)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const appUrl = process.env.APP_URL;
+    
+    logger.info("Continuous streamer starting", { 
+      runId,
+      envVars: {
+        SUPABASE_URL: supabaseUrl ? `${supabaseUrl.slice(0, 30)}...` : "NOT SET",
+        SUPABASE_KEY: supabaseKey ? `${supabaseKey.slice(0, 10)}...` : "NOT SET",
+        APP_URL: appUrl || "NOT SET",
+      }
+    });
 
     // Check if another streamer is already running
     const alreadyActive = await isStreamerActive();
@@ -197,6 +221,7 @@ export const continuousStreamer = schedules.task({
           scenarioCounts,
         });
 
+        logger.info(`Calling API: ${baseUrl}/api/run-match`);
         const result = await runSingleGame(baseUrl, scenario);
         scenarioCounts[scenario]++;
 
@@ -210,7 +235,11 @@ export const continuousStreamer = schedules.task({
           });
         } else {
           failed++;
-          logger.warn(`Game ${gamesPlayed} failed`, { error: result.error });
+          logger.error(`Game ${gamesPlayed} failed`, { 
+            error: result.error,
+            baseUrl,
+            scenario,
+          });
         }
 
         // Update state periodically

@@ -189,7 +189,7 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             />
           ))}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreA}</span>
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto tabular-nums">{match.scoreA}</span>
       </div>
 
       {/* Model B row */}
@@ -222,7 +222,7 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
             />
           ))}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{match.scoreB}</span>
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto tabular-nums">{match.scoreB}</span>
       </div>
     </motion.div>
   )
@@ -260,7 +260,7 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
             return <DecisionDot key={i} decision={round.agent1Decision} isWinner={winner === "agent1"} />
           })}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{game.agent1TotalScore}</span>
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto tabular-nums">{game.agent1TotalScore}</span>
         <span className="w-10 hidden sm:block">
           <FramingIndicator framing={game.framing} scenario={game.scenario} />
         </span>
@@ -283,7 +283,7 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
             return <DecisionDot key={i} decision={round.agent2Decision} isWinner={winner === "agent2"} />
           })}
         </div>
-        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto">{game.agent2TotalScore}</span>
+        <span className="font-mono text-xs sm:text-sm text-white/80 w-8 sm:w-10 text-right ml-auto tabular-nums">{game.agent2TotalScore}</span>
         <span className="w-8 hidden sm:block" />
       </div>
     </motion.div>

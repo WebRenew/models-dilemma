@@ -9,12 +9,12 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "The Model's Dilemma",
   description:
-    "A recreation of Robert Axelrod's 1984 experiment on Game Theory's classic thought experiment the Prisoner's Dilemma.",
+    "Testing whether LLMs are strategic reasoners or sophisticated mimics by pitting them against each other in Axelrod's classic Prisoner's Dilemma tournament.",
   generator: 'v0.app',
   metadataBase: new URL('https://models-dilemma.vercel.app'),
   openGraph: {
     title: "The Model's Dilemma",
-    description: "A recreation of Robert Axelrod's 1984 experiment on the Prisoner's Dilemma with AI models.",
+    description: "Testing whether LLMs are strategic reasoners or sophisticated mimics by pitting them against each other in Axelrod's classic Prisoner's Dilemma tournament.",
     type: 'website',
     images: [
       {
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: "The Model's Dilemma",
-    description: "A recreation of Robert Axelrod's 1984 experiment on the Prisoner's Dilemma with AI models.",
+    description: "Testing whether LLMs are strategic reasoners or sophisticated mimics by pitting them against each other in Axelrod's classic Prisoner's Dilemma tournament.",
     images: ['/og.png'],
   },
 }

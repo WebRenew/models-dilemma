@@ -35,4 +35,7 @@ yarn-error.log*
 *.tsbuildinfo
 PROMPT_REFACTOR_PLAN.md
 
+# Data exports
+grok-defections.json
+
 .trigger

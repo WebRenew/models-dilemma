@@ -27,11 +27,11 @@ export function RankingsCard({ rankings, onExport }: RankingsCardProps) {
                 key={entry.rank} 
                 className={`font-mono text-xs sm:text-sm flex ${
                   isDisabled 
-                    ? "bg-amber-500/20 text-amber-200/80 px-1 -mx-1 rounded" 
+                    ? "bg-amber-900/30 text-amber-200/80 px-1.5 py-0.5 -mx-1.5 rounded" 
                     : "text-white/80"
                 }`}
               >
-                <span className={`w-4 sm:w-5 shrink-0 ${isDisabled ? "text-amber-200/50" : "text-white/50"}`}>
+                <span className={`w-4 sm:w-5 shrink-0 ${isDisabled ? "text-amber-200/60" : "text-white/50"}`}>
                   {entry.rank}
                 </span>
                 <span className="truncate">{entry.modelId}</span>

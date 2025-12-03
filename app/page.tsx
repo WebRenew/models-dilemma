@@ -107,7 +107,7 @@ export default function Home() {
         <div className="bg-amber-900/30 border-b border-amber-500/20 px-4 py-2 relative">
           <p className="text-center text-amber-200/80 text-xs sm:text-sm font-mono pr-8">
             <span className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-2 animate-pulse" />
-            Monitoring issue with <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">deepseek/deepseek-v3.2-thinking</code> — temporarily removed from games
+            Monitoring issue with provider <code className="bg-amber-500/20 px-1.5 py-0.5 rounded">deepseek</code> — temporarily removed from games
           </p>
           <button
             onClick={() => setShowBanner(false)}

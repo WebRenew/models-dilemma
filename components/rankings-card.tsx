@@ -20,12 +20,24 @@ export function RankingsCard({ rankings, onExport }: RankingsCardProps) {
       <div>
         <p className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50 mb-2 sm:mb-3">Rankings</p>
         <div className="space-y-1 sm:space-y-1.5">
-          {rankings.slice(0, 10).map((entry) => (
-            <div key={entry.rank} className="font-mono text-xs sm:text-sm text-white/80 flex">
-              <span className="text-white/50 w-4 sm:w-5 shrink-0">{entry.rank}</span>
-              <span className="truncate">{entry.modelId}</span>
-            </div>
-          ))}
+          {rankings.slice(0, 10).map((entry) => {
+            const isDisabled = entry.modelId.includes("deepseek")
+            return (
+              <div 
+                key={entry.rank} 
+                className={`font-mono text-xs sm:text-sm flex ${
+                  isDisabled 
+                    ? "bg-amber-500/20 text-amber-200/80 px-1 -mx-1 rounded" 
+                    : "text-white/80"
+                }`}
+              >
+                <span className={`w-4 sm:w-5 shrink-0 ${isDisabled ? "text-amber-200/50" : "text-white/50"}`}>
+                  {entry.rank}
+                </span>
+                <span className="truncate">{entry.modelId}</span>
+              </div>
+            )
+          })}
           {rankings.length === 0 && <p className="font-mono text-xs sm:text-sm text-white/50">No games yet</p>}
         </div>
       </div>

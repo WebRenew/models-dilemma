@@ -12,6 +12,7 @@ import { WhitepaperModal } from "@/components/whitepaper-modal"
 import { PlayGameModal } from "@/components/play-game-modal"
 import { ExperimentDesign } from "@/components/experiment-design"
 import { Footer } from "@/components/footer"
+import { StatsSkeleton, RankingsSkeleton, StrategyStatsSkeleton, RoundsCardSkeleton } from "@/components/ui/skeleton"
 import type { GameRecord } from "@/lib/game-logic"
 import { MODEL_COUNT } from "@/lib/models"
 import { fetchGameStats, fetchModelRankings, exportGameDataCSV, fetchStrategyStats } from "@/lib/supabase/db"
@@ -23,6 +24,7 @@ export default function Home() {
   const [playGameOpen, setPlayGameOpen] = useState(false)
   const [liveMatchCount, setLiveMatchCount] = useState(0)
   const [showBanner, setShowBanner] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   const [dbStats, setDbStats] = useState({ totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 })
   const [dbRankings, setDbRankings] = useState<
@@ -39,7 +41,8 @@ export default function Home() {
     nonEnviousTotal: 0,
   })
 
-  const loadStats = useCallback(async () => {
+  const loadStats = useCallback(async (showLoading = false) => {
+    if (showLoading) setIsLoading(true)
     // Fetch all stats in parallel for faster loading
     const [stats, rankings, strategies] = await Promise.all([
       fetchGameStats(),
@@ -49,13 +52,14 @@ export default function Home() {
     setDbStats(stats)
     setDbRankings(rankings)
     setStrategyStats(strategies)
+    setIsLoading(false)
   }, [])
 
   useEffect(() => {
-    loadStats()
+    loadStats(true) // Show loading on initial load
 
-    // Refresh stats every 5 seconds
-    const interval = setInterval(loadStats, 5000)
+    // Refresh stats every 5 seconds (silent refresh)
+    const interval = setInterval(() => loadStats(false), 5000)
     return () => clearInterval(interval)
   }, [loadStats])
 
@@ -182,15 +186,33 @@ export default function Home() {
             className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-8 sm:mt-12 lg:mt-16 overflow-visible"
           >
             <div className="col-span-2 flex">
-              <RankingsCard rankings={rankings} onExport={exportDataset} />
+              {isLoading ? (
+                <RankingsSkeleton />
+              ) : (
+                <RankingsCard rankings={rankings} onExport={exportDataset} />
+              )}
             </div>
             <div className="flex flex-col gap-2">
-              <StatsCard label="Games Played" value={gamesPlayed} />
-              <StatsCard label="Models Available" value={modelsAvailable} />
-              <RoundsCard controlRounds={controlRounds} hiddenAgendaRounds={hiddenAgendaRounds} />
+              {isLoading ? (
+                <>
+                  <StatsSkeleton />
+                  <StatsSkeleton />
+                  <RoundsCardSkeleton />
+                </>
+              ) : (
+                <>
+                  <StatsCard label="Games Played" value={gamesPlayed} />
+                  <StatsCard label="Models Available" value={modelsAvailable} />
+                  <RoundsCard controlRounds={controlRounds} hiddenAgendaRounds={hiddenAgendaRounds} />
+                </>
+              )}
             </div>
             <div className="flex">
-              <StrategyStats stats={strategyStats} />
+              {isLoading ? (
+                <StrategyStatsSkeleton />
+              ) : (
+                <StrategyStats stats={strategyStats} />
+              )}
             </div>
           </motion.div>
         </div>

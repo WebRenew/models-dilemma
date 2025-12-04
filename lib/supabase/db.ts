@@ -141,36 +141,39 @@ export async function saveCompleteGame(
 export async function fetchGameStats() {
   const supabase = createClient()
 
-  const { data: totalGames } = await supabase.from("game_rounds").select("game_id").eq("is_final_round", true)
-
-  const { data: controlGames } = await supabase
+  // Single query instead of 3 separate queries
+  const { data: finalRounds } = await supabase
     .from("game_rounds")
-    .select("game_id")
+    .select("game_id, game_type")
     .eq("is_final_round", true)
-    .eq("game_type", "control")
 
-  const { data: hiddenAgendaGames } = await supabase
-    .from("game_rounds")
-    .select("game_id")
-    .eq("is_final_round", true)
-    .eq("game_type", "hidden_agenda")
+  if (!finalRounds) {
+    return { totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 }
+  }
+
+  // Count in memory - much faster than 3 network round-trips
+  let controlRounds = 0
+  let hiddenAgendaRounds = 0
+  for (const round of finalRounds) {
+    if (round.game_type === "control") controlRounds++
+    else if (round.game_type === "hidden_agenda") hiddenAgendaRounds++
+  }
 
   return {
-    totalGames: totalGames?.length || 0,
-    controlRounds: controlGames?.length || 0,
-    hiddenAgendaRounds: hiddenAgendaGames?.length || 0,
+    totalGames: finalRounds.length,
+    controlRounds,
+    hiddenAgendaRounds,
   }
 }
 
 export async function fetchModelRankings(limit = 10) {
   const supabase = createClient()
 
-  // Get all final rounds to calculate rankings
+  // Get only needed columns for ranking calculation (not select("*"))
   const { data: finalRounds } = await supabase
     .from("game_rounds")
-    .select("*")
+    .select("agent1_model_id, agent1_display_name, agent1_cumulative_score, agent2_model_id, agent2_display_name, agent2_cumulative_score, game_winner")
     .eq("is_final_round", true)
-    .order("game_timestamp", { ascending: false })
 
   if (!finalRounds || finalRounds.length === 0) return []
 
@@ -226,7 +229,14 @@ export async function fetchModelRankings(limit = 10) {
   }
 
   return Object.values(modelStats)
-    .sort((a, b) => b.totalPoints - a.totalPoints)
+    .sort((a, b) => {
+      // Primary: sort by wins (descending)
+      if (b.wins !== a.wins) return b.wins - a.wins
+      // Tiebreaker: fewer losses is better
+      if (a.losses !== b.losses) return a.losses - b.losses
+      // Final tiebreaker: total points
+      return b.totalPoints - a.totalPoints
+    })
     .slice(0, limit)
 }
 
@@ -309,56 +319,69 @@ export async function exportGameDataCSV(): Promise<string> {
 export async function fetchRecentGames(limit = 50): Promise<GameRecord[]> {
   const supabase = createClient()
 
-  // Get final rounds to identify games, ordered by most recent
-  const { data: finalRounds, error } = await supabase
+  // Step 1: Get final rounds to identify recent games
+  const { data: finalRounds, error: finalError } = await supabase
     .from("game_rounds")
-    .select("*")
+    .select("game_id, agent1_model_id, agent2_model_id, agent1_display_name, agent2_display_name, agent1_cumulative_score, agent2_cumulative_score, game_winner, game_timestamp, game_type, scenario")
     .eq("is_final_round", true)
     .order("game_timestamp", { ascending: false })
     .limit(limit)
 
-  if (error || !finalRounds) {
-    console.error("[v0] Failed to fetch recent games:", error)
+  if (finalError || !finalRounds || finalRounds.length === 0) {
+    console.error("[v0] Failed to fetch recent games:", finalError)
     return []
   }
 
-  // For each game, fetch all rounds
-  const games: GameRecord[] = []
+  // Step 2: Get ALL rounds for these games in ONE query (not N queries!)
+  const gameIds = finalRounds.map((r) => r.game_id)
+  const { data: allRoundsData, error: roundsError } = await supabase
+    .from("game_rounds")
+    .select("game_id, round_number, agent1_decision, agent2_decision, agent1_round_points, agent2_round_points, agent1_reasoning, agent2_reasoning")
+    .in("game_id", gameIds)
+    .order("round_number", { ascending: true })
 
-  for (const finalRound of finalRounds) {
-    const { data: allRounds } = await supabase
-      .from("game_rounds")
-      .select("*")
-      .eq("game_id", finalRound.game_id)
-      .order("round_number", { ascending: true })
-
-    if (allRounds && allRounds.length > 0) {
-      const rounds: RoundResult[] = allRounds.map((r) => ({
-        round: r.round_number,
-        agent1Decision: r.agent1_decision,
-        agent2Decision: r.agent2_decision,
-        agent1Points: r.agent1_round_points,
-        agent2Points: r.agent2_round_points,
-        agent1Reasoning: r.agent1_reasoning || undefined,
-        agent2Reasoning: r.agent2_reasoning || undefined,
-      }))
-
-      games.push({
-        id: finalRound.game_id,
-        agent1Model: finalRound.agent1_model_id,
-        agent2Model: finalRound.agent2_model_id,
-        agent1DisplayName: finalRound.agent1_display_name,
-        agent2DisplayName: finalRound.agent2_display_name,
-        rounds,
-        agent1TotalScore: finalRound.agent1_cumulative_score,
-        agent2TotalScore: finalRound.agent2_cumulative_score,
-        winner: finalRound.game_winner || "tie",
-        timestamp: new Date(finalRound.game_timestamp).getTime(),
-        framing: finalRound.game_type === "hidden_agenda" ? "cloaked" : "overt",
-        scenario: finalRound.scenario || null,
-      })
-    }
+  if (roundsError || !allRoundsData) {
+    console.error("[v0] Failed to fetch game rounds:", roundsError)
+    return []
   }
+
+  // Step 3: Group rounds by game_id in memory
+  const roundsByGame = new Map<string, typeof allRoundsData>()
+  for (const round of allRoundsData) {
+    const existing = roundsByGame.get(round.game_id) || []
+    existing.push(round)
+    roundsByGame.set(round.game_id, existing)
+  }
+
+  // Step 4: Build game records
+  const games: GameRecord[] = finalRounds.map((finalRound) => {
+    const gameRounds = roundsByGame.get(finalRound.game_id) || []
+    
+    const rounds: RoundResult[] = gameRounds.map((r) => ({
+      round: r.round_number,
+      agent1Decision: r.agent1_decision,
+      agent2Decision: r.agent2_decision,
+      agent1Points: r.agent1_round_points,
+      agent2Points: r.agent2_round_points,
+      agent1Reasoning: r.agent1_reasoning || undefined,
+      agent2Reasoning: r.agent2_reasoning || undefined,
+    }))
+
+    return {
+      id: finalRound.game_id,
+      agent1Model: finalRound.agent1_model_id,
+      agent2Model: finalRound.agent2_model_id,
+      agent1DisplayName: finalRound.agent1_display_name,
+      agent2DisplayName: finalRound.agent2_display_name,
+      rounds,
+      agent1TotalScore: finalRound.agent1_cumulative_score,
+      agent2TotalScore: finalRound.agent2_cumulative_score,
+      winner: finalRound.game_winner || "tie",
+      timestamp: new Date(finalRound.game_timestamp).getTime(),
+      framing: finalRound.game_type === "hidden_agenda" ? "cloaked" : "overt",
+      scenario: finalRound.scenario || null,
+    }
+  })
 
   return games
 }
@@ -367,66 +390,80 @@ export async function fetchNewGames(afterTimestamp: number): Promise<GameRecord[
   const supabase = createClient()
   const isoTimestamp = new Date(afterTimestamp).toISOString()
 
-  // Use created_at (when row was inserted) not game_timestamp (when game started)
-  // This ensures we catch games that took time to complete
-  const { data: finalRounds, error } = await supabase
+  // Step 1: Get final rounds for new games
+  const { data: finalRounds, error: finalError } = await supabase
     .from("game_rounds")
-    .select("*")
+    .select("game_id, agent1_model_id, agent2_model_id, agent1_display_name, agent2_display_name, agent1_cumulative_score, agent2_cumulative_score, game_winner, game_timestamp, game_type, scenario")
     .eq("is_final_round", true)
     .gt("created_at", isoTimestamp)
     .order("created_at", { ascending: false })
 
-  if (error || !finalRounds || finalRounds.length === 0) {
+  if (finalError || !finalRounds || finalRounds.length === 0) {
     return []
   }
 
-  const games: GameRecord[] = []
+  // Step 2: Get ALL rounds for these games in ONE query
+  const gameIds = finalRounds.map((r) => r.game_id)
+  const { data: allRoundsData, error: roundsError } = await supabase
+    .from("game_rounds")
+    .select("game_id, round_number, agent1_decision, agent2_decision, agent1_round_points, agent2_round_points, agent1_reasoning, agent2_reasoning")
+    .in("game_id", gameIds)
+    .order("round_number", { ascending: true })
 
-  for (const finalRound of finalRounds) {
-    const { data: allRounds } = await supabase
-      .from("game_rounds")
-      .select("*")
-      .eq("game_id", finalRound.game_id)
-      .order("round_number", { ascending: true })
-
-    if (allRounds && allRounds.length > 0) {
-      const rounds: RoundResult[] = allRounds.map((r) => ({
-        round: r.round_number,
-        agent1Decision: r.agent1_decision,
-        agent2Decision: r.agent2_decision,
-        agent1Points: r.agent1_round_points,
-        agent2Points: r.agent2_round_points,
-        agent1Reasoning: r.agent1_reasoning || undefined,
-        agent2Reasoning: r.agent2_reasoning || undefined,
-      }))
-
-      games.push({
-        id: finalRound.game_id,
-        agent1Model: finalRound.agent1_model_id,
-        agent2Model: finalRound.agent2_model_id,
-        agent1DisplayName: finalRound.agent1_display_name,
-        agent2DisplayName: finalRound.agent2_display_name,
-        rounds,
-        agent1TotalScore: finalRound.agent1_cumulative_score,
-        agent2TotalScore: finalRound.agent2_cumulative_score,
-        winner: finalRound.game_winner || "tie",
-        timestamp: new Date(finalRound.game_timestamp).getTime(),
-        framing: finalRound.game_type === "hidden_agenda" ? "cloaked" : "overt",
-        scenario: finalRound.scenario || null,
-      })
-    }
+  if (roundsError || !allRoundsData) {
+    return []
   }
 
-  return games
+  // Step 3: Group rounds by game_id in memory
+  const roundsByGame = new Map<string, typeof allRoundsData>()
+  for (const round of allRoundsData) {
+    const existing = roundsByGame.get(round.game_id) || []
+    existing.push(round)
+    roundsByGame.set(round.game_id, existing)
+  }
+
+  // Step 4: Build game records
+  return finalRounds.map((finalRound) => {
+    const gameRounds = roundsByGame.get(finalRound.game_id) || []
+    
+    const rounds: RoundResult[] = gameRounds.map((r) => ({
+      round: r.round_number,
+      agent1Decision: r.agent1_decision,
+      agent2Decision: r.agent2_decision,
+      agent1Points: r.agent1_round_points,
+      agent2Points: r.agent2_round_points,
+      agent1Reasoning: r.agent1_reasoning || undefined,
+      agent2Reasoning: r.agent2_reasoning || undefined,
+    }))
+
+    return {
+      id: finalRound.game_id,
+      agent1Model: finalRound.agent1_model_id,
+      agent2Model: finalRound.agent2_model_id,
+      agent1DisplayName: finalRound.agent1_display_name,
+      agent2DisplayName: finalRound.agent2_display_name,
+      rounds,
+      agent1TotalScore: finalRound.agent1_cumulative_score,
+      agent2TotalScore: finalRound.agent2_cumulative_score,
+      winner: finalRound.game_winner || "tie",
+      timestamp: new Date(finalRound.game_timestamp).getTime(),
+      framing: finalRound.game_type === "hidden_agenda" ? "cloaked" : "overt",
+      scenario: finalRound.scenario || null,
+    }
+  })
 }
 
 export async function fetchStrategyStats() {
   const supabase = createClient()
 
-  // Calculate strategy stats from game_rounds
-  const { data: finalRounds, error } = await supabase.from("game_rounds").select("*").eq("is_final_round", true)
+  // Fetch ALL rounds in a single query (optimized from N+1 queries)
+  const { data: allRoundsData, error } = await supabase
+    .from("game_rounds")
+    .select("game_id, round_number, agent1_decision, agent2_decision")
+    .order("game_id")
+    .order("round_number", { ascending: true })
 
-  if (error || !finalRounds || finalRounds.length === 0) {
+  if (error || !allRoundsData || allRoundsData.length === 0) {
     return {
       forgiving: 0,
       forgivingTotal: 0,
@@ -439,64 +476,66 @@ export async function fetchStrategyStats() {
     }
   }
 
+  // Group rounds by game_id in memory
+  const gameRounds = new Map<string, typeof allRoundsData>()
+  for (const round of allRoundsData) {
+    const existing = gameRounds.get(round.game_id) || []
+    existing.push(round)
+    gameRounds.set(round.game_id, existing)
+  }
+
   let forgiving = 0
-  let forgivingTotal = 0 // Total opportunities to forgive (opponent defected last round)
+  let forgivingTotal = 0
   let retaliating = 0
-  let retaliatingTotal = 0 // Same as forgiving total (opponent defected last round)
+  let retaliatingTotal = 0
   let nice = 0
-  let niceTotal = 0 // Total first moves (2 per game)
+  let niceTotal = 0
   let nonEnvious = 0
-  let nonEnviousTotal = 0 // Total agents (2 per game)
+  let nonEnviousTotal = 0
 
-  // For each completed game, fetch all rounds and calculate strategy
-  for (const finalRound of finalRounds) {
-    const { data: allRounds } = await supabase
-      .from("game_rounds")
-      .select("*")
-      .eq("game_id", finalRound.game_id)
-      .order("round_number", { ascending: true })
+  // Process each game's rounds
+  for (const rounds of gameRounds.values()) {
+    if (rounds.length === 0) continue
 
-    if (allRounds && allRounds.length > 0) {
-      // Nice: first move is cooperate (2 agents per game)
-      niceTotal += 2
-      if (allRounds[0].agent1_decision === "cooperate") nice++
-      if (allRounds[0].agent2_decision === "cooperate") nice++
+    // Nice: first move is cooperate (2 agents per game)
+    niceTotal += 2
+    if (rounds[0].agent1_decision === "cooperate") nice++
+    if (rounds[0].agent2_decision === "cooperate") nice++
 
-      // Check forgiving and retaliating patterns
-      for (let i = 1; i < allRounds.length; i++) {
-        const prevRound = allRounds[i - 1]
-        const currRound = allRounds[i]
+    // Check forgiving and retaliating patterns
+    for (let i = 1; i < rounds.length; i++) {
+      const prevRound = rounds[i - 1]
+      const currRound = rounds[i]
 
-        // Agent 1: opponent (agent2) defected last round - opportunity to forgive/retaliate
-        if (prevRound.agent2_decision === "defect") {
-          forgivingTotal++
-          retaliatingTotal++
-          if (currRound.agent1_decision === "cooperate") {
-            forgiving++
-          } else if (currRound.agent1_decision === "defect") {
-            retaliating++
-          }
-        }
-
-        // Agent 2: opponent (agent1) defected last round - opportunity to forgive/retaliate
-        if (prevRound.agent1_decision === "defect") {
-          forgivingTotal++
-          retaliatingTotal++
-          if (currRound.agent2_decision === "cooperate") {
-            forgiving++
-          } else if (currRound.agent2_decision === "defect") {
-            retaliating++
-          }
+      // Agent 1: opponent (agent2) defected last round
+      if (prevRound.agent2_decision === "defect") {
+        forgivingTotal++
+        retaliatingTotal++
+        if (currRound.agent1_decision === "cooperate") {
+          forgiving++
+        } else if (currRound.agent1_decision === "defect") {
+          retaliating++
         }
       }
 
-      // Non-envious: agent doesn't defect more than opponent (2 agents per game)
-      nonEnviousTotal += 2
-      const agent1Defects = allRounds.filter((r) => r.agent1_decision === "defect").length
-      const agent2Defects = allRounds.filter((r) => r.agent2_decision === "defect").length
-      if (agent1Defects <= agent2Defects) nonEnvious++
-      if (agent2Defects <= agent1Defects) nonEnvious++
+      // Agent 2: opponent (agent1) defected last round
+      if (prevRound.agent1_decision === "defect") {
+        forgivingTotal++
+        retaliatingTotal++
+        if (currRound.agent2_decision === "cooperate") {
+          forgiving++
+        } else if (currRound.agent2_decision === "defect") {
+          retaliating++
+        }
+      }
     }
+
+    // Non-envious: agent doesn't defect more than opponent
+    nonEnviousTotal += 2
+    const agent1Defects = rounds.filter((r) => r.agent1_decision === "defect").length
+    const agent2Defects = rounds.filter((r) => r.agent2_decision === "defect").length
+    if (agent1Defects <= agent2Defects) nonEnvious++
+    if (agent2Defects <= agent1Defects) nonEnvious++
   }
 
   return {

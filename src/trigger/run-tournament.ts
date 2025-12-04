@@ -4,6 +4,96 @@ import { gateway } from "@ai-sdk/gateway";
 import { generateText } from "ai";
 
 // =============================================================================
+// Retry Configuration
+// =============================================================================
+
+const RETRY_CONFIG = {
+  maxAttempts: 3,
+  baseDelayMs: 2_000,
+  maxDelayMs: 30_000,
+  timeoutMs: 90_000, // 90 seconds per attempt
+} as const;
+
+/**
+ * Retry wrapper with exponential backoff and jitter
+ * Retries on timeout, network errors, and 5xx errors
+ */
+async function withRetry<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  context: { model: string; round: number }
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= RETRY_CONFIG.maxAttempts; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), RETRY_CONFIG.timeoutMs);
+
+      try {
+        const result = await fn(controller.signal);
+        clearTimeout(timeoutId);
+        return result;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const isRetryable = isRetryableError(lastError);
+
+      logger.warn(`⚠️ Attempt ${attempt}/${RETRY_CONFIG.maxAttempts} failed`, {
+        model: context.model,
+        round: context.round,
+        error: lastError.message,
+        isRetryable,
+        willRetry: isRetryable && attempt < RETRY_CONFIG.maxAttempts,
+      });
+
+      if (!isRetryable || attempt >= RETRY_CONFIG.maxAttempts) {
+        throw lastError;
+      }
+
+      // Exponential backoff with jitter
+      const baseDelay = RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt - 1);
+      const jitter = Math.random() * 1000;
+      const delay = Math.min(baseDelay + jitter, RETRY_CONFIG.maxDelayMs);
+
+      logger.info(`🔄 Retrying in ${(delay / 1000).toFixed(1)}s...`, {
+        model: context.model,
+        round: context.round,
+        attempt: attempt + 1,
+      });
+
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  throw lastError ?? new Error("All retry attempts failed");
+}
+
+function isRetryableError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+
+  // Timeout/abort errors
+  if (message.includes("abort") || message.includes("timeout")) return true;
+
+  // Network errors
+  if (message.includes("network") || message.includes("econnreset")) return true;
+  if (message.includes("socket") || message.includes("connection")) return true;
+
+  // Rate limits (often recoverable with backoff)
+  if (message.includes("rate limit") || message.includes("429")) return true;
+
+  // Server errors (5xx)
+  if (message.includes("500") || message.includes("502") || message.includes("503")) return true;
+  if (message.includes("504") || message.includes("internal server")) return true;
+
+  // Gateway/upstream errors
+  if (message.includes("gateway") || message.includes("upstream")) return true;
+
+  return false;
+}
+
+// =============================================================================
 // Configuration
 // =============================================================================
 
@@ -13,8 +103,9 @@ type CloakedScenario = "sales" | "research" | "creator";
 
 const DELAY_BETWEEN_GAMES_MS = 90_000; // 90 seconds between games (rate limit protection)
 const DELAY_BETWEEN_ROUNDS_MS = 1_000; // 1 second between rounds (minimal delay for live streaming)
-const STREAMER_DURATION_HOURS = 4;
-const STREAMER_DURATION_MS = STREAMER_DURATION_HOURS * 60 * 60 * 1000;
+const STREAMER_DURATION_MINUTES = 55; // Run for 55 minutes, leaving 5 minutes buffer before next hourly run
+const STREAMER_DURATION_MS = STREAMER_DURATION_MINUTES * 60 * 1000;
+const MIN_TIME_FOR_NEW_GAME_MS = 5 * 60 * 1000; // Don't start a new game if less than 5 min remaining (games can take 3-4 min)
 
 const AI_MODELS = [
   "anthropic/claude-sonnet-4.5",
@@ -305,65 +396,105 @@ async function runGame(
       let rawResponseA: string | null = null;
       let rawResponseB: string | null = null;
 
-      try {
-        const [resultA, resultB] = await Promise.all([
-          generateText({
-            model: gateway(modelA),
-            prompt: promptA,
-            temperature: 0,
-          }),
-          generateText({
-            model: gateway(modelB),
-            prompt: promptB,
-            temperature: 0,
-          }),
-        ]);
-
-        rawResponseA = resultA.text;
-        rawResponseB = resultB.text;
-
-        const parsedA = parseResponse(resultA.text, scenario);
-        const parsedB = parseResponse(resultB.text, scenario);
-
-        rawActionA = parsedA.rawAction;
-        rawActionB = parsedB.rawAction;
-
-        // Log if parsing failed
-        if (!parsedA.decision) {
-          logger.warn(`Model A (${modelA}) parse failed`, { 
-            scenario, 
-            round, 
-            rawAction: rawActionA,
-            responsePreview: rawResponseA?.slice(0, 200)
-          });
+      // Call models in parallel with retry
+      const callModelA = async () => {
+        try {
+          const result = await withRetry(
+            (signal) =>
+              generateText({
+                model: gateway(modelA),
+                prompt: promptA,
+                temperature: 0,
+                abortSignal: signal,
+              }),
+            { model: modelA, round }
+          );
+          return { success: true as const, result };
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          return { success: false as const, error: errMsg };
         }
-        if (!parsedB.decision) {
-          logger.warn(`Model B (${modelB}) parse failed`, { 
-            scenario, 
-            round, 
-            rawAction: rawActionB,
-            responsePreview: rawResponseB?.slice(0, 200)
+      };
+
+      const callModelB = async () => {
+        try {
+          const result = await withRetry(
+            (signal) =>
+              generateText({
+                model: gateway(modelB),
+                prompt: promptB,
+                temperature: 0,
+                abortSignal: signal,
+              }),
+            { model: modelB, round }
+          );
+          return { success: true as const, result };
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          return { success: false as const, error: errMsg };
+        }
+      };
+
+      const [resA, resB] = await Promise.all([callModelA(), callModelB()]);
+
+      if (resA.success) {
+        rawResponseA = resA.result.text;
+        const parsedA = parseResponse(resA.result.text, scenario);
+        rawActionA = parsedA.rawAction;
+
+        if (!parsedA.decision) {
+          logger.warn(`Model A (${modelA}) parse failed`, {
+            scenario,
+            round,
+            rawAction: rawActionA,
+            responsePreview: rawResponseA?.slice(0, 200),
           });
         }
 
         responseA = {
           decision: parsedA.decision,
-          reasoning: resultA.text.slice(0, 500),
+          reasoning: resA.result.text.slice(0, 500),
         };
+      } else {
+        logger.error(`Model A (${modelA}) failed after retries`, {
+          round,
+          error: resA.error,
+        });
+        responseA = {
+          decision: null,
+          reasoning: "",
+          error: `API Error (after ${RETRY_CONFIG.maxAttempts} attempts): ${resA.error}`,
+        };
+      }
+
+      if (resB.success) {
+        rawResponseB = resB.result.text;
+        const parsedB = parseResponse(resB.result.text, scenario);
+        rawActionB = parsedB.rawAction;
+
+        if (!parsedB.decision) {
+          logger.warn(`Model B (${modelB}) parse failed`, {
+            scenario,
+            round,
+            rawAction: rawActionB,
+            responsePreview: rawResponseB?.slice(0, 200),
+          });
+        }
+
         responseB = {
           decision: parsedB.decision,
-          reasoning: resultB.text.slice(0, 500),
+          reasoning: resB.result.text.slice(0, 500),
         };
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`Model call failed for round ${round}`, { 
-          modelA, 
-          modelB, 
-          scenario,
-          error: errMsg 
+      } else {
+        logger.error(`Model B (${modelB}) failed after retries`, {
+          round,
+          error: resB.error,
         });
-        responseA = { decision: null, reasoning: "", error: errMsg };
-        responseB = { decision: null, reasoning: "", error: errMsg };
+        responseB = {
+          decision: null,
+          reasoning: "",
+          error: `API Error (after ${RETRY_CONFIG.maxAttempts} attempts): ${resB.error}`,
+        };
       }
 
       const actionA = responseA.decision || "error";
@@ -465,33 +596,86 @@ async function runGame(
 // Streamer State Management
 // =============================================================================
 
+const STREAMER_MAX_AGE_MS = 65 * 60 * 1000; // 65 minutes - consider stale after this (runs are 55 min)
+
 async function isStreamerActive(): Promise<boolean> {
   try {
     const supabase = getSupabaseClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("streamer_state")
       .select("*")
       .eq("id", "singleton")
       .single();
     
-    if (!data) return false;
+    if (error) {
+      logger.warn("⚠️ isStreamerActive: DB query failed", {
+        error: error.message,
+        code: error.code,
+      });
+      return false;
+    }
     
-    const startedAt = new Date(data.started_at).getTime();
-    const maxAge = 4.5 * 60 * 60 * 1000;
-    return data.is_active && (Date.now() - startedAt) < maxAge;
-  } catch {
+    if (!data) {
+      logger.info("📋 isStreamerActive: No streamer_state record found");
+      return false;
+    }
+    
+    const now = Date.now();
+    const startedAt = data.started_at ? new Date(data.started_at).getTime() : 0;
+    const age = now - startedAt;
+    const isStale = age >= STREAMER_MAX_AGE_MS;
+    const isActive = data.is_active && !isStale;
+    
+    logger.info("📋 isStreamerActive: State check", {
+      is_active: data.is_active,
+      run_id: data.run_id?.slice(0, 8),
+      started_at: data.started_at,
+      updated_at: data.updated_at,
+      ageMs: age,
+      ageMinutes: Math.floor(age / 60000),
+      maxAgeMs: STREAMER_MAX_AGE_MS,
+      isStale,
+      result: isActive,
+    });
+    
+    return isActive;
+  } catch (err) {
+    logger.error("❌ isStreamerActive: Unexpected error", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return false;
   }
 }
 
 async function setStreamerState(isActive: boolean, runId?: string): Promise<void> {
   const supabase = getSupabaseClient();
-  await supabase.from("streamer_state").upsert({
+  const payload = {
     id: "singleton",
     is_active: isActive,
     run_id: runId || null,
     started_at: isActive ? new Date().toISOString() : null,
     updated_at: new Date().toISOString(),
+  };
+  
+  logger.info("📝 setStreamerState: Updating", {
+    isActive,
+    runId: runId?.slice(0, 8),
+    payload,
+  });
+  
+  const { error } = await supabase.from("streamer_state").upsert(payload);
+  
+  if (error) {
+    logger.error("❌ setStreamerState: Failed to update", {
+      error: error.message,
+      code: error.code,
+    });
+    throw error;
+  }
+  
+  logger.info("✅ setStreamerState: Updated successfully", {
+    isActive,
+    runId: runId?.slice(0, 8),
   });
 }
 
@@ -501,42 +685,68 @@ async function setStreamerState(isActive: boolean, runId?: string): Promise<void
 
 export const continuousStreamer = schedules.task({
   id: "continuous-streamer",
-  cron: "0 */4 * * *",
-  maxDuration: 14400,
+  cron: "0 * * * *", // Every hour at minute 0
+  maxDuration: 3600, // 1 hour max - streamer runs for 55 min with 5 min buffer
   run: async () => {
     const runId = crypto.randomUUID();
+    const processStartTime = Date.now();
     
-    logger.info("🚀 Continuous streamer initializing", { 
-      runId: runId.slice(0, 8),
-      durationHours: STREAMER_DURATION_HOURS,
-      delayBetweenGames: `${DELAY_BETWEEN_GAMES_MS / 1000}s`,
-      delayBetweenRounds: `${DELAY_BETWEEN_ROUNDS_MS / 1000}s`,
+    // =========================================================================
+    // LIFECYCLE LOGGING - Track exactly when and why streamer starts/stops
+    // =========================================================================
+    
+    logger.info("🚀 ======== CONTINUOUS STREAMER STARTING ========", { 
+      runId,
+      runIdShort: runId.slice(0, 8),
+      configuredDurationMinutes: STREAMER_DURATION_MINUTES,
+      configuredDurationMs: STREAMER_DURATION_MS,
+      minTimeForNewGameMs: MIN_TIME_FOR_NEW_GAME_MS,
+      effectiveGameWindowMinutes: (STREAMER_DURATION_MS - MIN_TIME_FOR_NEW_GAME_MS) / 60000,
+      delayBetweenGamesMs: DELAY_BETWEEN_GAMES_MS,
+      delayBetweenRoundsMs: DELAY_BETWEEN_ROUNDS_MS,
       modelCount: AI_MODELS.length,
-      scenarios: SCENARIOS.join(", "),
+      models: AI_MODELS.map(m => m.split("/")[1] || m),
+      scenarios: SCENARIOS,
+      nodeVersion: process.version,
+      timestamp: new Date().toISOString(),
     });
 
-    logger.info("🔍 Checking for active streamers...");
-    if (await isStreamerActive()) {
-      logger.warn("⚠️ Another streamer is active, skipping this run");
+    // Check for active streamer
+    logger.info("🔍 Checking streamer_state table for active streamers...");
+    const isActive = await isStreamerActive();
+    logger.info(`🔍 isStreamerActive result: ${isActive}`);
+    
+    if (isActive) {
+      logger.warn("⚠️ ======== STREAMER SKIPPED - ANOTHER ACTIVE ========", {
+        runId: runId.slice(0, 8),
+        reason: "Another streamer instance is already running",
+      });
       return { skipped: true, reason: "Another streamer running" };
     }
-    logger.info("✅ No active streamer found, proceeding");
+    logger.info("✅ No active streamer found, proceeding to claim slot");
 
+    // Claim the streamer slot
     await setStreamerState(true, runId);
-    logger.info("🟢 Streamer state set to ACTIVE", { runId: runId.slice(0, 8) });
+    logger.info("🟢 Streamer state set to ACTIVE", { 
+      runId: runId.slice(0, 8),
+      claimTime: new Date().toISOString(),
+    });
 
     const startTime = Date.now();
     let gamesPlayed = 0;
     let successful = 0;
     let failed = 0;
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 10;
     
     const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
 
     const formatElapsed = () => {
       const elapsed = Date.now() - startTime;
-      const minutes = Math.floor(elapsed / 60000);
+      const hours = Math.floor(elapsed / 3600000);
+      const minutes = Math.floor((elapsed % 3600000) / 60000);
       const seconds = Math.floor((elapsed % 60000) / 1000);
-      return `${minutes}m ${seconds}s`;
+      return hours > 0 ? `${hours}h ${minutes}m ${seconds}s` : `${minutes}m ${seconds}s`;
     };
 
     const formatRemaining = () => {
@@ -546,8 +756,92 @@ export const continuousStreamer = schedules.task({
       return `${hours}h ${minutes}m`;
     };
 
+    const getMemoryUsage = () => {
+      const usage = process.memoryUsage();
+      return {
+        heapUsedMB: Math.round(usage.heapUsed / 1024 / 1024),
+        heapTotalMB: Math.round(usage.heapTotal / 1024 / 1024),
+        rssMB: Math.round(usage.rss / 1024 / 1024),
+      };
+    };
+
     try {
-      while (Date.now() - startTime < STREAMER_DURATION_MS) {
+      logger.info("🔄 ======== ENTERING MAIN GAME LOOP ========", {
+        runId: runId.slice(0, 8),
+        targetDurationMs: STREAMER_DURATION_MS,
+        targetDurationMinutes: STREAMER_DURATION_MINUTES,
+      });
+
+      let loopIteration = 0;
+      
+      while (true) {
+        loopIteration++;
+        const elapsedMs = Date.now() - startTime;
+        const remainingMs = STREAMER_DURATION_MS - elapsedMs;
+        
+        // =====================================================================
+        // LOOP CONDITION CHECK - Log exactly why we continue or exit
+        // =====================================================================
+        
+        if (elapsedMs >= STREAMER_DURATION_MS) {
+          logger.info("⏰ ======== TIME LIMIT REACHED - NORMAL EXIT ========", {
+            runId: runId.slice(0, 8),
+            loopIteration,
+            elapsedMs,
+            targetMs: STREAMER_DURATION_MS,
+            elapsed: formatElapsed(),
+            gamesPlayed,
+            successful,
+            failed,
+          });
+          break;
+        }
+
+        // Check for too many consecutive failures
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          logger.error("🚨 ======== TOO MANY CONSECUTIVE FAILURES - EMERGENCY EXIT ========", {
+            runId: runId.slice(0, 8),
+            consecutiveFailures,
+            maxAllowed: MAX_CONSECUTIVE_FAILURES,
+            gamesPlayed,
+            successful,
+            failed,
+          });
+          break;
+        }
+
+        // Check if we have enough time to safely complete a new game
+        if (remainingMs < MIN_TIME_FOR_NEW_GAME_MS) {
+          logger.info("⏰ ======== INSUFFICIENT TIME FOR NEW GAME - GRACEFUL EXIT ========", {
+            runId: runId.slice(0, 8),
+            remainingMs,
+            minRequiredMs: MIN_TIME_FOR_NEW_GAME_MS,
+            remainingMinutes: (remainingMs / 60000).toFixed(1),
+            gamesPlayed,
+            successful,
+            failed,
+            reason: "Not enough time buffer to guarantee game completion before next cron",
+          });
+          break;
+        }
+
+        // Log loop health every iteration
+        if (loopIteration % 10 === 1) {
+          logger.info("💓 Loop health check", {
+            runId: runId.slice(0, 8),
+            loopIteration,
+            elapsed: formatElapsed(),
+            remaining: formatRemaining(),
+            elapsedMs,
+            remainingMs,
+            targetMs: STREAMER_DURATION_MS,
+            gamesPlayed,
+            successRate: gamesPlayed > 0 ? `${((successful / gamesPlayed) * 100).toFixed(1)}%` : "N/A",
+            consecutiveFailures,
+            memory: getMemoryUsage(),
+          });
+        }
+
         // Pick random models
         const modelA = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
         let modelB = AI_MODELS[Math.floor(Math.random() * AI_MODELS.length)];
@@ -567,44 +861,71 @@ export const continuousStreamer = schedules.task({
         const shortB = modelB.split("/")[1] || modelB;
         
         logger.info(`🎮 [Game ${gamesPlayed}] Starting`, { 
+          runId: runId.slice(0, 8),
+          loopIteration,
           modelA: shortA, 
           modelB: shortB, 
           scenario,
           elapsed: formatElapsed(),
           remaining: formatRemaining(),
+          consecutiveFailures,
         });
 
         const gameStartTime = Date.now();
-        const result = await runGame(modelA, modelB, scenario);
-        const gameDuration = ((Date.now() - gameStartTime) / 1000).toFixed(1);
-        scenarioCounts[scenario]++;
+        
+        try {
+          const result = await runGame(modelA, modelB, scenario);
+          const gameDuration = ((Date.now() - gameStartTime) / 1000).toFixed(1);
+          scenarioCounts[scenario]++;
 
-        if (result.success) {
-          successful++;
-          const winner = result.scoreA! > result.scoreB! 
-            ? shortA 
-            : result.scoreB! > result.scoreA! 
-              ? shortB 
-              : "TIE";
-          logger.info(`✅ [Game ${gamesPlayed}] Complete`, { 
-            gameId: result.gameId?.slice(0, 8),
-            score: `${result.scoreA}-${result.scoreB}`,
-            winner,
-            duration: `${gameDuration}s`,
-            stats: `${successful}W/${failed}F`,
-          });
-        } else {
+          if (result.success) {
+            successful++;
+            consecutiveFailures = 0; // Reset on success
+            const winner = result.scoreA! > result.scoreB! 
+              ? shortA 
+              : result.scoreB! > result.scoreA! 
+                ? shortB 
+                : "TIE";
+            logger.info(`✅ [Game ${gamesPlayed}] Complete`, { 
+              runId: runId.slice(0, 8),
+              gameId: result.gameId?.slice(0, 8),
+              score: `${result.scoreA}-${result.scoreB}`,
+              winner,
+              duration: `${gameDuration}s`,
+              stats: `${successful}W/${failed}F`,
+              elapsed: formatElapsed(),
+            });
+          } else {
+            failed++;
+            consecutiveFailures++;
+            logger.error(`❌ [Game ${gamesPlayed}] Failed`, { 
+              runId: runId.slice(0, 8),
+              error: result.error,
+              duration: `${gameDuration}s`,
+              stats: `${successful}W/${failed}F`,
+              consecutiveFailures,
+              elapsed: formatElapsed(),
+            });
+          }
+        } catch (gameError) {
           failed++;
-          logger.error(`❌ [Game ${gamesPlayed}] Failed`, { 
-            error: result.error,
+          consecutiveFailures++;
+          const gameDuration = ((Date.now() - gameStartTime) / 1000).toFixed(1);
+          logger.error(`💥 [Game ${gamesPlayed}] Threw exception`, {
+            runId: runId.slice(0, 8),
+            error: gameError instanceof Error ? gameError.message : String(gameError),
+            stack: gameError instanceof Error ? gameError.stack : undefined,
             duration: `${gameDuration}s`,
             stats: `${successful}W/${failed}F`,
+            consecutiveFailures,
+            elapsed: formatElapsed(),
           });
         }
 
-        // Log summary every 5 games
+        // Log detailed summary every 5 games
         if (gamesPlayed % 5 === 0) {
-          logger.info(`📊 Progress Report`, {
+          logger.info(`📊 ======== PROGRESS REPORT (Game ${gamesPlayed}) ========`, {
+            runId: runId.slice(0, 8),
             gamesPlayed,
             successful,
             failed,
@@ -612,48 +933,131 @@ export const continuousStreamer = schedules.task({
             scenarioCounts,
             elapsed: formatElapsed(),
             remaining: formatRemaining(),
+            memory: getMemoryUsage(),
+            consecutiveFailures,
           });
         }
 
-        // Update state periodically
+        // Update state every 10 games to show we're alive
         if (gamesPlayed % 10 === 0) {
-          await setStreamerState(true, runId);
-          logger.info("🔄 Streamer state refreshed");
+          try {
+            await setStreamerState(true, runId);
+            logger.info("🔄 Streamer state refreshed in DB", {
+              runId: runId.slice(0, 8),
+              gamesPlayed,
+            });
+          } catch (stateError) {
+            logger.warn("⚠️ Failed to refresh streamer state", {
+              error: stateError instanceof Error ? stateError.message : String(stateError),
+            });
+            // Don't fail the whole loop for state update failures
+          }
         }
 
-        // Wait between games
-        const remaining = STREAMER_DURATION_MS - (Date.now() - startTime);
-        if (remaining > DELAY_BETWEEN_GAMES_MS) {
-          logger.info(`⏳ Waiting ${DELAY_BETWEEN_GAMES_MS / 1000}s before next game...`);
+        // Wait between games (if we have time remaining)
+        const postGameRemainingMs = STREAMER_DURATION_MS - (Date.now() - startTime);
+        
+        if (postGameRemainingMs <= 0) {
+          logger.info("⏰ Time exhausted after game completion", {
+            runId: runId.slice(0, 8),
+            gamesPlayed,
+            elapsed: formatElapsed(),
+          });
+          break;
+        }
+        
+        if (postGameRemainingMs > DELAY_BETWEEN_GAMES_MS) {
+          logger.debug(`⏳ Waiting ${DELAY_BETWEEN_GAMES_MS / 1000}s before next game...`, {
+            remainingMs: postGameRemainingMs,
+          });
           await new Promise(r => setTimeout(r, DELAY_BETWEEN_GAMES_MS));
         } else {
-          logger.info("⏰ Time limit approaching, ending streamer");
+          logger.info("⏰ Insufficient time for another game + delay, ending gracefully", {
+            runId: runId.slice(0, 8),
+            remainingMs: postGameRemainingMs,
+            requiredMs: DELAY_BETWEEN_GAMES_MS,
+            gamesPlayed,
+          });
           break;
         }
       }
 
-      logger.info("🏁 Streamer session complete", {
+      // =========================================================================
+      // NORMAL COMPLETION
+      // =========================================================================
+      
+      const totalRuntime = Date.now() - processStartTime;
+      logger.info("🏁 ======== STREAMER SESSION COMPLETE ========", {
+        runId: runId.slice(0, 8),
+        exitReason: "normal_completion",
         totalGames: gamesPlayed,
         successful,
         failed,
         successRate: gamesPlayed > 0 ? `${((successful / gamesPlayed) * 100).toFixed(1)}%` : "N/A",
         scenarioCounts,
         totalDuration: formatElapsed(),
+        totalRuntimeMs: totalRuntime,
+        memory: getMemoryUsage(),
       });
 
-      return { skipped: false, gamesPlayed, successful, failed, scenarioCounts };
+      return { 
+        skipped: false, 
+        gamesPlayed, 
+        successful, 
+        failed, 
+        scenarioCounts,
+        exitReason: "normal_completion",
+        runtimeMs: totalRuntime,
+      };
+      
     } catch (error) {
-      logger.error("💥 Streamer crashed", { 
+      // =========================================================================
+      // CRASH HANDLER
+      // =========================================================================
+      
+      const totalRuntime = Date.now() - processStartTime;
+      logger.error("💥 ======== STREAMER CRASHED ========", { 
+        runId: runId.slice(0, 8),
+        exitReason: "crash",
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
         gamesPlayed,
         successful,
         failed,
         elapsed: formatElapsed(),
+        totalRuntimeMs: totalRuntime,
+        memory: getMemoryUsage(),
       });
       throw error;
+      
     } finally {
-      await setStreamerState(false);
-      logger.info("🔴 Streamer state set to INACTIVE");
+      // =========================================================================
+      // CLEANUP - Always runs
+      // =========================================================================
+      
+      logger.info("🧹 ======== STREAMER CLEANUP STARTING ========", {
+        runId: runId.slice(0, 8),
+      });
+      
+      try {
+        await setStreamerState(false);
+        logger.info("🔴 Streamer state set to INACTIVE", {
+          runId: runId.slice(0, 8),
+        });
+      } catch (cleanupError) {
+        logger.error("⚠️ Failed to cleanup streamer state", {
+          runId: runId.slice(0, 8),
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+      
+      logger.info("🏁 ======== STREAMER PROCESS ENDING ========", {
+        runId: runId.slice(0, 8),
+        finalGamesPlayed: gamesPlayed,
+        finalSuccessful: successful,
+        finalFailed: failed,
+        totalProcessTime: `${((Date.now() - processStartTime) / 1000 / 60).toFixed(1)} minutes`,
+      });
     }
   },
 });
@@ -800,7 +1204,7 @@ function pickModelsByGameCount(modelCounts: Map<string, number>, excludeModels: 
 
 export const fastTournamentTask = task({
   id: "fast-tournament",
-  maxDuration: 14400, // 4 hours max
+  maxDuration: 21600, // 6 hours max
   run: async (payload: { 
     games?: number; 
     concurrency?: number;
@@ -810,7 +1214,7 @@ export const fastTournamentTask = task({
     const concurrency = payload.concurrency || 4;
     const forcedScenario = payload.scenario;
     
-    logger.info("🚀 Fast tournament starting", { 
+    logger.info("🚀 Fast tournament starting (rolling concurrency)", { 
       gamesToRun,
       concurrency,
       forcedScenario: forcedScenario || "balanced",
@@ -818,9 +1222,11 @@ export const fastTournamentTask = task({
     });
 
     const startTime = Date.now();
+    let started = 0;
     let completed = 0;
     let successful = 0;
     let failed = 0;
+    let scenarioIndex = 0;
     const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
     
     // Get initial game counts per model
@@ -829,78 +1235,128 @@ export const fastTournamentTask = task({
       counts: Object.fromEntries(modelCounts),
     });
 
-    // Process games in batches of `concurrency`
-    while (completed < gamesToRun) {
-      const batchSize = Math.min(concurrency, gamesToRun - completed);
-      const batchPromises: Promise<{ success: boolean; modelA: string; modelB: string; scenario: Scenario }>[] = [];
+    // Track currently running models to avoid duplicates in concurrent games
+    const modelsInFlight = new Set<string>();
+
+    // Helper to start a new game
+    const startGame = (): Promise<{ success: boolean; modelA: string; modelB: string; scenario: Scenario; gameNum: number }> | null => {
+      if (started >= gamesToRun) return null;
       
-      // Track models being used in this batch to avoid duplicates
-      const modelsInBatch: string[] = [];
+      // Pick models not currently in flight
+      const excludeModels = Array.from(modelsInFlight);
+      const [modelA, modelB] = pickModelsByGameCount(modelCounts, excludeModels);
       
-      for (let i = 0; i < batchSize; i++) {
-        // Pick models prioritizing those with fewer games
-        const [modelA, modelB] = pickModelsByGameCount(modelCounts, modelsInBatch);
-        modelsInBatch.push(modelA, modelB);
-        
-        // Temporarily increment counts to balance within batch
-        modelCounts.set(modelA, (modelCounts.get(modelA) || 0) + 1);
-        modelCounts.set(modelB, (modelCounts.get(modelB) || 0) + 1);
-        
-        // Rotate scenarios: each game in batch gets different scenario (overt, sales, research, creator)
-        const scenario = forcedScenario || SCENARIOS[i % SCENARIOS.length];
-        scenarioCounts[scenario]++;
-        
-        const shortA = modelA.split("/")[1] || modelA;
-        const shortB = modelB.split("/")[1] || modelB;
-        
-        logger.info(`🎮 [${completed + i + 1}/${gamesToRun}] Queuing`, {
-          modelA: shortA,
-          modelB: shortB,
-          scenario,
-          batch: Math.floor(completed / concurrency) + 1,
-        });
-        
-        // Start game (no await - run concurrently)
-        batchPromises.push(
-          runGame(modelA, modelB, scenario).then(result => ({
-            success: result.success,
-            modelA,
-            modelB,
-            scenario,
-          }))
-        );
-      }
+      // Mark models as in flight
+      modelsInFlight.add(modelA);
+      modelsInFlight.add(modelB);
       
-      // Wait for all games in batch to complete
-      const batchResults = await Promise.all(batchPromises);
+      // Increment counts optimistically
+      modelCounts.set(modelA, (modelCounts.get(modelA) || 0) + 1);
+      modelCounts.set(modelB, (modelCounts.get(modelB) || 0) + 1);
       
-      for (const result of batchResults) {
-        completed++;
-        if (result.success) {
-          successful++;
-        } else {
-          failed++;
-          // Decrement counts for failed games so they get retried
-          modelCounts.set(result.modelA, Math.max(0, (modelCounts.get(result.modelA) || 1) - 1));
-          modelCounts.set(result.modelB, Math.max(0, (modelCounts.get(result.modelB) || 1) - 1));
-        }
-      }
+      // Rotate scenarios
+      const scenario = forcedScenario || SCENARIOS[scenarioIndex % SCENARIOS.length];
+      scenarioIndex++;
+      scenarioCounts[scenario]++;
       
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-      const gamesPerMin = (completed / (parseInt(elapsed) / 60)).toFixed(1);
+      started++;
+      const gameNum = started;
       
-      logger.info(`📊 Batch complete`, {
-        completed,
-        total: gamesToRun,
-        successful,
-        failed,
-        elapsed: `${elapsed}s`,
-        rate: `${gamesPerMin} games/min`,
-        scenarioCounts,
+      const shortA = modelA.split("/")[1] || modelA;
+      const shortB = modelB.split("/")[1] || modelB;
+      
+      logger.info(`🎮 [${gameNum}/${gamesToRun}] Starting`, {
+        modelA: shortA,
+        modelB: shortB,
+        scenario,
+        inFlight: modelsInFlight.size / 2,
       });
       
-      // Refresh model counts from DB every 20 games to stay accurate
-      if (completed % 20 === 0) {
+      return runGame(modelA, modelB, scenario).then(result => {
+        // Release models from flight
+        modelsInFlight.delete(modelA);
+        modelsInFlight.delete(modelB);
+        
+        return {
+          success: result.success,
+          modelA,
+          modelB,
+          scenario,
+          gameNum,
+        };
+      });
+    };
+
+    // Start initial batch of concurrent games
+    const activeGames = new Map<Promise<{ success: boolean; modelA: string; modelB: string; scenario: Scenario; gameNum: number }>, number>();
+    
+    for (let i = 0; i < concurrency && started < gamesToRun; i++) {
+      const game = startGame();
+      if (game) activeGames.set(game, started);
+    }
+
+    // Process games as they complete - immediately start new ones
+    while (activeGames.size > 0) {
+      // Wait for ANY game to complete
+      const result = await Promise.race(activeGames.keys());
+      
+      // Find and remove the completed promise from active games
+      for (const [promise] of activeGames) {
+        // Check if this promise resolved to our result (by comparing gameNum)
+        const resolved = await Promise.race([promise, Promise.resolve(null)]);
+        if (resolved && resolved.gameNum === result.gameNum) {
+          activeGames.delete(promise);
+          break;
+        }
+      }
+      completed++;
+      
+      const shortA = result.modelA.split("/")[1] || result.modelA;
+      const shortB = result.modelB.split("/")[1] || result.modelB;
+      
+      if (result.success) {
+        successful++;
+        logger.info(`✅ [${result.gameNum}] Complete`, {
+          modelA: shortA,
+          modelB: shortB,
+          scenario: result.scenario,
+        });
+      } else {
+        failed++;
+        // Decrement counts for failed games
+        modelCounts.set(result.modelA, Math.max(0, (modelCounts.get(result.modelA) || 1) - 1));
+        modelCounts.set(result.modelB, Math.max(0, (modelCounts.get(result.modelB) || 1) - 1));
+        logger.warn(`❌ [${result.gameNum}] Failed`, {
+          modelA: shortA,
+          modelB: shortB,
+        });
+      }
+      
+      // Immediately start a new game if we have more to run
+      if (started < gamesToRun) {
+        const newGame = startGame();
+        if (newGame) activeGames.set(newGame, started);
+      }
+      
+      // Log progress every 10 completions
+      if (completed % 10 === 0) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+        const gamesPerMin = (completed / (parseInt(elapsed) / 60)).toFixed(1);
+        
+        logger.info(`📊 Progress`, {
+          completed,
+          started,
+          total: gamesToRun,
+          successful,
+          failed,
+          inFlight: activeGames.size,
+          elapsed: `${elapsed}s`,
+          rate: `${gamesPerMin} games/min`,
+        });
+      }
+      
+      // Refresh model counts from DB every 50 games
+      if (completed % 50 === 0) {
         modelCounts = await getModelGameCounts();
       }
     }

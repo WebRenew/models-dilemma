@@ -11,6 +11,96 @@ type Scenario = "overt" | "sales" | "research" | "creator";
 type CloakedScenario = "sales" | "research" | "creator";
 type Decision = "cooperate" | "defect" | "error";
 
+// =============================================================================
+// Retry Configuration
+// =============================================================================
+
+const RETRY_CONFIG = {
+  maxAttempts: 3,
+  baseDelayMs: 2_000,
+  maxDelayMs: 30_000,
+  timeoutMs: 90_000, // 90 seconds per attempt
+} as const;
+
+/**
+ * Retry wrapper with exponential backoff and jitter
+ * Retries on timeout, network errors, and 5xx errors
+ */
+async function withRetry<T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  context: { model: string; round: number }
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= RETRY_CONFIG.maxAttempts; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), RETRY_CONFIG.timeoutMs);
+
+      try {
+        const result = await fn(controller.signal);
+        clearTimeout(timeoutId);
+        return result;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const isRetryable = isRetryableError(lastError);
+
+      logger.warn(`⚠️ Attempt ${attempt}/${RETRY_CONFIG.maxAttempts} failed`, {
+        model: context.model,
+        round: context.round,
+        error: lastError.message,
+        isRetryable,
+        willRetry: isRetryable && attempt < RETRY_CONFIG.maxAttempts,
+      });
+
+      if (!isRetryable || attempt >= RETRY_CONFIG.maxAttempts) {
+        throw lastError;
+      }
+
+      // Exponential backoff with jitter
+      const baseDelay = RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt - 1);
+      const jitter = Math.random() * 1000;
+      const delay = Math.min(baseDelay + jitter, RETRY_CONFIG.maxDelayMs);
+
+      logger.info(`🔄 Retrying in ${(delay / 1000).toFixed(1)}s...`, {
+        model: context.model,
+        round: context.round,
+        attempt: attempt + 1,
+      });
+
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  throw lastError ?? new Error("All retry attempts failed");
+}
+
+function isRetryableError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+
+  // Timeout/abort errors
+  if (message.includes("abort") || message.includes("timeout")) return true;
+
+  // Network errors
+  if (message.includes("network") || message.includes("econnreset")) return true;
+  if (message.includes("socket") || message.includes("connection")) return true;
+
+  // Rate limits (often recoverable with backoff)
+  if (message.includes("rate limit") || message.includes("429")) return true;
+
+  // Server errors (5xx)
+  if (message.includes("500") || message.includes("502") || message.includes("503")) return true;
+  if (message.includes("504") || message.includes("internal server")) return true;
+
+  // Gateway/upstream errors
+  if (message.includes("gateway") || message.includes("upstream")) return true;
+
+  return false;
+}
+
 interface UserGamePayload {
   gameId: string;
   agent1Model: string;
@@ -376,142 +466,159 @@ export const userGameTask = task({
           ? generateOvertPrompt(round, scoreB, scoreA, historyB)
           : generateCloakedPrompt(scenario, round, scoreB, scoreA, historyB);
 
-      // Call models separately to capture individual errors
-      let responseA: { decision: Decision | null; reasoning: string; error?: string } = {
-        decision: null,
-        reasoning: "",
-      };
-      let responseB: { decision: Decision | null; reasoning: string; error?: string } = {
-        decision: null,
-        reasoning: "",
-      };
-
-      let rawActionA: string | null = null;
-      let rawActionB: string | null = null;
-      let rawResponseA: string | null = null;
-      let rawResponseB: string | null = null;
-
-      // Call Agent 1
-      const startTimeA = Date.now();
-      try {
-        logger.info(`📤 Calling ${agent1Model}...`, { round, gameId: gameId.slice(0, 8) });
-        const resultA = await generateText({
-          model: gateway(agent1Model),
-          prompt: promptA,
-          temperature: 0,
-        });
-        const latencyA = Date.now() - startTimeA;
-        
-        rawResponseA = resultA.text;
-        const parsedA = parseResponse(resultA.text, scenario);
-        rawActionA = parsedA.rawAction;
-
-        logger.info(`📥 ${agent1Model} responded`, { 
-          round,
-          latencyMs: latencyA,
-          decision: parsedA.decision,
-          rawAction: rawActionA,
-          responseLength: rawResponseA?.length,
-          usage: resultA.usage,
-        });
-
-        if (!parsedA.decision) {
-          const parseError = `Parse failed: could not extract decision from response. Raw action: ${rawActionA}`;
-          logger.warn(`⚠️ Agent 1 (${agent1Model}) parse failed`, {
-            rawAction: rawActionA,
-            fullResponse: rawResponseA,
-          });
-          responseA = {
-            decision: null,
-            reasoning: resultA.text.slice(0, 1000),
-            error: parseError,
-          };
-        } else {
-          responseA = {
+      // Call both models in parallel (Prisoner's Dilemma = simultaneous decisions)
+      logger.info(`📤 Calling both models in parallel...`, { 
+        round, 
+        gameId: gameId.slice(0, 8),
+        agent1: agent1Model,
+        agent2: agent2Model,
+      });
+      
+      const startTime = Date.now();
+      
+      // Create parallel model call promises with retry
+      const callAgentA = async () => {
+        const startA = Date.now();
+        try {
+          const resultA = await withRetry(
+            (signal) =>
+              generateText({
+                model: gateway(agent1Model),
+                prompt: promptA,
+                temperature: 0,
+                abortSignal: signal,
+              }),
+            { model: agent1Model, round }
+          );
+          const latencyA = Date.now() - startA;
+          const parsedA = parseResponse(resultA.text, scenario);
+          
+          logger.info(`📥 ${agent1Model} responded`, { 
+            round,
+            latencyMs: latencyA,
             decision: parsedA.decision,
-            reasoning: resultA.text.slice(0, 1000),
-          };
-        }
-      } catch (err) {
-        const latencyA = Date.now() - startTimeA;
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const errStack = err instanceof Error ? err.stack : undefined;
-        
-        logger.error(`❌ Agent 1 (${agent1Model}) API call failed`, {
-          round,
-          latencyMs: latencyA,
-          error: errMsg,
-          stack: errStack,
-          errorName: err instanceof Error ? err.name : "Unknown",
-        });
-        
-        responseA = { 
-          decision: null, 
-          reasoning: "", 
-          error: `API Error: ${errMsg}` 
-        };
-      }
-
-      // Call Agent 2
-      const startTimeB = Date.now();
-      try {
-        logger.info(`📤 Calling ${agent2Model}...`, { round, gameId: gameId.slice(0, 8) });
-        const resultB = await generateText({
-          model: gateway(agent2Model),
-          prompt: promptB,
-          temperature: 0,
-        });
-        const latencyB = Date.now() - startTimeB;
-        
-        rawResponseB = resultB.text;
-        const parsedB = parseResponse(resultB.text, scenario);
-        rawActionB = parsedB.rawAction;
-
-        logger.info(`📥 ${agent2Model} responded`, { 
-          round,
-          latencyMs: latencyB,
-          decision: parsedB.decision,
-          rawAction: rawActionB,
-          responseLength: rawResponseB?.length,
-          usage: resultB.usage,
-        });
-
-        if (!parsedB.decision) {
-          const parseError = `Parse failed: could not extract decision from response. Raw action: ${rawActionB}`;
-          logger.warn(`⚠️ Agent 2 (${agent2Model}) parse failed`, {
-            rawAction: rawActionB,
-            fullResponse: rawResponseB,
+            rawAction: parsedA.rawAction,
+            responseLength: resultA.text.length,
+            usage: resultA.usage,
           });
-          responseB = {
-            decision: null,
-            reasoning: resultB.text.slice(0, 1000),
-            error: parseError,
+          
+          if (!parsedA.decision) {
+            const parseError = `Parse failed: could not extract decision. Raw action: ${parsedA.rawAction}`;
+            logger.warn(`⚠️ Agent 1 (${agent1Model}) parse failed`, {
+              rawAction: parsedA.rawAction,
+            });
+            return {
+              decision: null as Decision | null,
+              reasoning: resultA.text.slice(0, 1000),
+              error: parseError,
+              rawAction: parsedA.rawAction,
+              rawResponse: resultA.text,
+              latencyMs: latencyA,
+            };
+          }
+          
+          return {
+            decision: parsedA.decision as Decision | null,
+            reasoning: resultA.text.slice(0, 1000),
+            rawAction: parsedA.rawAction,
+            rawResponse: resultA.text,
+            latencyMs: latencyA,
           };
-        } else {
-          responseB = {
-            decision: parsedB.decision,
-            reasoning: resultB.text.slice(0, 1000),
+        } catch (err) {
+          const latencyA = Date.now() - startA;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.error(`❌ Agent 1 (${agent1Model}) failed after retries`, { round, latencyMs: latencyA, error: errMsg });
+          return {
+            decision: null as Decision | null,
+            reasoning: "",
+            error: `API Error (after ${RETRY_CONFIG.maxAttempts} attempts): ${errMsg}`,
+            rawAction: null as string | null,
+            rawResponse: null as string | null,
+            latencyMs: latencyA,
           };
         }
-      } catch (err) {
-        const latencyB = Date.now() - startTimeB;
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const errStack = err instanceof Error ? err.stack : undefined;
-        
-        logger.error(`❌ Agent 2 (${agent2Model}) API call failed`, {
-          round,
-          latencyMs: latencyB,
-          error: errMsg,
-          stack: errStack,
-          errorName: err instanceof Error ? err.name : "Unknown",
-        });
-        
-        responseB = { 
-          decision: null, 
-          reasoning: "", 
-          error: `API Error: ${errMsg}` 
-        };
-      }
+      };
+      
+      const callAgentB = async () => {
+        const startB = Date.now();
+        try {
+          const resultB = await withRetry(
+            (signal) =>
+              generateText({
+                model: gateway(agent2Model),
+                prompt: promptB,
+                temperature: 0,
+                abortSignal: signal,
+              }),
+            { model: agent2Model, round }
+          );
+          const latencyB = Date.now() - startB;
+          const parsedB = parseResponse(resultB.text, scenario);
+          
+          logger.info(`📥 ${agent2Model} responded`, { 
+            round,
+            latencyMs: latencyB,
+            decision: parsedB.decision,
+            rawAction: parsedB.rawAction,
+            responseLength: resultB.text.length,
+            usage: resultB.usage,
+          });
+          
+          if (!parsedB.decision) {
+            const parseError = `Parse failed: could not extract decision. Raw action: ${parsedB.rawAction}`;
+            logger.warn(`⚠️ Agent 2 (${agent2Model}) parse failed`, {
+              rawAction: parsedB.rawAction,
+            });
+            return {
+              decision: null as Decision | null,
+              reasoning: resultB.text.slice(0, 1000),
+              error: parseError,
+              rawAction: parsedB.rawAction,
+              rawResponse: resultB.text,
+              latencyMs: latencyB,
+            };
+          }
+          
+          return {
+            decision: parsedB.decision as Decision | null,
+            reasoning: resultB.text.slice(0, 1000),
+            rawAction: parsedB.rawAction,
+            rawResponse: resultB.text,
+            latencyMs: latencyB,
+          };
+        } catch (err) {
+          const latencyB = Date.now() - startB;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.error(`❌ Agent 2 (${agent2Model}) failed after retries`, { round, latencyMs: latencyB, error: errMsg });
+          return {
+            decision: null as Decision | null,
+            reasoning: "",
+            error: `API Error (after ${RETRY_CONFIG.maxAttempts} attempts): ${errMsg}`,
+            rawAction: null as string | null,
+            rawResponse: null as string | null,
+            latencyMs: latencyB,
+          };
+        }
+      };
+      
+      // Execute both calls in parallel
+      const [resultA, resultB] = await Promise.all([callAgentA(), callAgentB()]);
+      
+      const totalLatency = Date.now() - startTime;
+      logger.info(`⚡ Both models responded`, {
+        round,
+        totalLatencyMs: totalLatency,
+        agent1LatencyMs: resultA.latencyMs,
+        agent2LatencyMs: resultB.latencyMs,
+        savedMs: (resultA.latencyMs + resultB.latencyMs) - totalLatency,
+      });
+      
+      const responseA = { decision: resultA.decision, reasoning: resultA.reasoning, error: resultA.error };
+      const responseB = { decision: resultB.decision, reasoning: resultB.reasoning, error: resultB.error };
+      const rawActionA = resultA.rawAction;
+      const rawActionB = resultB.rawAction;
+      const rawResponseA = resultA.rawResponse;
+      const rawResponseB = resultB.rawResponse;
 
       const actionA: Decision = responseA.decision || "error";
       const actionB: Decision = responseB.decision || "error";

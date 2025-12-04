@@ -75,19 +75,17 @@ export function ScrambleText({
   delayMs = 0,
   duration = 0.9,
 }: ScrambleTextProps) {
-  const [displayText, setDisplayText] = useState("")
+  // Initialize with text to avoid flash of empty content
+  const [displayText, setDisplayText] = useState(text)
+  const [hasAnimated, setHasAnimated] = useState(false)
   const containerRef = useRef<HTMLSpanElement>(null)
-  const hasAnimated = useRef(false)
+  const animationRef = useRef<gsap.core.Tween | null>(null)
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Run animation only once on initial mount
   useEffect(() => {
-    if (hasAnimated.current) return
-    if (!text) {
-      setDisplayText("")
-      return
-    }
+    if (hasAnimated || !text) return
 
-    hasAnimated.current = true
-    
     // Start with scrambled text
     const scrambledStart = text
       .split("")
@@ -95,19 +93,28 @@ export function ScrambleText({
       .join("")
     setDisplayText(scrambledStart)
 
-    const timeoutId = setTimeout(() => {
-      runScrambleAnimation(text, duration, setDisplayText)
+    timeoutRef.current = setTimeout(() => {
+      animationRef.current = runScrambleAnimation(text, duration, setDisplayText, () => {
+        setHasAnimated(true)
+      })
     }, delayMs)
 
     return () => {
-      clearTimeout(timeoutId)
-      gsap.killTweensOf(containerRef.current)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      if (animationRef.current) animationRef.current.kill()
     }
-  }, [text, delayMs, duration])
+  }, []) // Empty deps - only run on mount
+
+  // Handle text prop changes after initial animation
+  useEffect(() => {
+    if (hasAnimated && displayText !== text) {
+      setDisplayText(text)
+    }
+  }, [text, hasAnimated, displayText])
 
   return (
     <span ref={containerRef} className={className}>
-      {displayText}
+      {displayText || text}
     </span>
   )
 }

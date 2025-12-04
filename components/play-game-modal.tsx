@@ -335,30 +335,32 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 bg-black"
+          className="fixed inset-0 z-50 bg-black overflow-y-auto"
         >
           {/* Header */}
-          <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-black via-black/80 to-transparent">
-            <div className="flex items-center gap-4">
-              <h2 className="font-mono text-lg text-white">
-                {gameState === "setup" && "Configure Match"}
+          <div className="sticky top-0 left-0 right-0 z-10 flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 bg-black border-b border-white/10">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+              <h2 className="font-mono text-xs sm:text-lg text-white truncate">
+                {gameState === "setup" && <span className="hidden sm:inline">Configure Match</span>}
+                {gameState === "setup" && <span className="sm:hidden">Setup</span>}
                 {gameState === "playing" && (
                   <span className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    Round {currentRound} of {TOTAL_ROUNDS}
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    Round {currentRound}/{TOTAL_ROUNDS}
                   </span>
                 )}
-                {gameState === "complete" && "Match Complete"}
+                {gameState === "complete" && <span className="hidden sm:inline">Match Complete</span>}
+                {gameState === "complete" && <span className="sm:hidden">Complete</span>}
               </h2>
               {selectedScenario && gameState !== "setup" && (
-                <span className="font-mono text-xs px-2 py-1 bg-white/10 text-white/60">
+                <span className="font-mono text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 bg-white/10 text-white/60 shrink-0">
                   {selectedScenario.badge}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               {gameState === "playing" && (
-                <div className="flex items-center gap-1.5 text-white/40">
+                <div className="hidden sm:flex items-center gap-1.5 text-white/40">
                   <Info className="w-3.5 h-3.5" />
                   <span className="font-mono text-xs">Game continues if closed</span>
                 </div>
@@ -376,50 +378,50 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
 
           {/* Setup Screen */}
           {gameState === "setup" && (
-            <div className="flex items-center justify-center h-full px-6">
+            <div className="flex items-center justify-center min-h-[calc(100vh-60px)] px-3 sm:px-6 py-4">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="w-full max-w-2xl space-y-8"
+                className="w-full max-w-2xl space-y-4 sm:space-y-8"
               >
                 {error && (
-                  <div className="p-4 border border-red-500/50 bg-red-500/10 text-red-400 font-mono text-sm">
+                  <div className="p-3 sm:p-4 border border-red-500/50 bg-red-500/10 text-red-400 font-mono text-xs sm:text-sm">
                     {error}
                   </div>
                 )}
 
                 {/* Scenario Selection */}
                 <div>
-                  <Label className="font-mono text-xs uppercase tracking-wider text-white/50 mb-4 block">
+                  <Label className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50 mb-3 sm:mb-4 block">
                     Prompt Type
                   </Label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                     {SCENARIOS.map((s) => (
                       <button
                         key={s.id}
                         onClick={() => setScenario(s.id)}
-                        className={`p-4 border text-left transition-all ${
+                        className={`p-3 sm:p-4 border text-left transition-all ${
                           scenario === s.id
                             ? "border-white/50 bg-white/5"
                             : "border-white/15 hover:border-white/30 hover:bg-white/5"
                         }`}
                       >
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="font-mono text-xs text-white/40">{s.badge}</span>
-                          <span className="font-mono text-sm text-white">{s.name}</span>
+                        <div className="flex items-center gap-2 mb-1 sm:mb-2">
+                          <span className="font-mono text-[10px] sm:text-xs text-white/40">{s.badge}</span>
+                          <span className="font-mono text-xs sm:text-sm text-white">{s.name}</span>
                         </div>
-                        <p className="text-xs text-white/50">{s.description}</p>
+                        <p className="text-[10px] sm:text-xs text-white/50 line-clamp-2">{s.description}</p>
                       </button>
                     ))}
                   </div>
                 </div>
 
                 {/* Model Selection */}
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   <div>
-                    <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Model A</Label>
+                    <Label className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50">Model A</Label>
                     <Select value={agent1Model} onValueChange={setAgent1Model}>
-                      <SelectTrigger className="mt-2 w-full font-mono text-sm bg-transparent border-white/15 text-white">
+                      <SelectTrigger className="mt-2 w-full font-mono text-xs sm:text-sm bg-transparent border-white/15 text-white">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-black border-white/15 max-h-64">
@@ -427,7 +429,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                           <div key={provider}>
                             <div className="px-2 py-1.5 text-xs font-mono text-white/50 uppercase">{provider}</div>
                             {models.map((model) => (
-                              <SelectItem key={model.id} value={model.id} className="font-mono text-sm text-white/80">
+                              <SelectItem key={model.id} value={model.id} className="font-mono text-xs sm:text-sm text-white/80">
                                 {model.displayName}
                               </SelectItem>
                             ))}
@@ -438,9 +440,9 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   </div>
 
                   <div>
-                    <Label className="font-mono text-xs uppercase tracking-wider text-white/50">Model B</Label>
+                    <Label className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50">Model B</Label>
                     <Select value={agent2Model} onValueChange={setAgent2Model}>
-                      <SelectTrigger className="mt-2 w-full font-mono text-sm bg-transparent border-white/15 text-white">
+                      <SelectTrigger className="mt-2 w-full font-mono text-xs sm:text-sm bg-transparent border-white/15 text-white">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-black border-white/15 max-h-64">
@@ -448,7 +450,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                           <div key={provider}>
                             <div className="px-2 py-1.5 text-xs font-mono text-white/50 uppercase">{provider}</div>
                             {models.map((model) => (
-                              <SelectItem key={model.id} value={model.id} className="font-mono text-sm text-white/80">
+                              <SelectItem key={model.id} value={model.id} className="font-mono text-xs sm:text-sm text-white/80">
                                 {model.displayName}
                               </SelectItem>
                             ))}
@@ -461,9 +463,9 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
 
                 <Button
                   onClick={startGame}
-                  className="w-full font-mono text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 py-6"
+                  className="w-full font-mono text-xs sm:text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 py-4 sm:py-6"
                 >
-                  <Zap className="w-4 h-4 mr-2" />
+                  <Zap className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
                   Start Match
                 </Button>
               </motion.div>
@@ -472,28 +474,28 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
 
           {/* Playing / Complete Screen */}
           {(gameState === "playing" || gameState === "complete") && (
-            <div className="h-full pt-16 pb-6 px-6 flex flex-col">
+            <div className="flex flex-col min-h-[calc(100vh-60px)] p-3 sm:p-6">
               {/* Score Display */}
-              <div className="flex items-center justify-center gap-8 py-6">
+              <div className="flex items-center justify-center gap-4 sm:gap-8 py-3 sm:py-6">
                 <div className="text-center">
-                  <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
+                  <p className="font-mono text-[10px] sm:text-xs text-white/50 uppercase tracking-wider mb-1 truncate max-w-[80px] sm:max-w-none">
                     {getShortModelName(agent1Model)}
                   </p>
                   <p
-                    className={`font-mono text-5xl font-bold ${
+                    className={`font-mono text-3xl sm:text-5xl font-bold ${
                       gameState === "complete" && agent1Total > agent2Total ? "text-emerald-400" : "text-white"
                     }`}
                   >
                     {agent1Total}
                   </p>
                 </div>
-                <div className="font-mono text-2xl text-white/20">vs</div>
+                <div className="font-mono text-lg sm:text-2xl text-white/20">vs</div>
                 <div className="text-center">
-                  <p className="font-mono text-xs text-white/50 uppercase tracking-wider mb-1">
+                  <p className="font-mono text-[10px] sm:text-xs text-white/50 uppercase tracking-wider mb-1 truncate max-w-[80px] sm:max-w-none">
                     {getShortModelName(agent2Model)}
                   </p>
                   <p
-                    className={`font-mono text-5xl font-bold ${
+                    className={`font-mono text-3xl sm:text-5xl font-bold ${
                       gameState === "complete" && agent2Total > agent1Total ? "text-emerald-400" : "text-white"
                     }`}
                   >
@@ -502,43 +504,41 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 </div>
               </div>
 
-              {/* Three Column Layout: Prompt | Agent 1 | Agent 2 */}
-              <div className="flex-1 grid grid-cols-3 gap-4 min-h-0">
-                {/* Left Column: System Prompt (same for both agents) */}
-                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-0">
-                  <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
+              {/* Responsive Layout: Stack on mobile, 2-col on tablet, 3-col on desktop */}
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 min-h-0">
+                {/* Left Column: System Prompt - Hidden on mobile, shown on lg */}
+                <div className="hidden lg:flex flex-col border border-white/10 bg-white/[0.02] min-h-0 max-h-[40vh] lg:max-h-none">
+                  <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
                     <Info className="w-4 h-4 text-amber-400" />
-                    <span className="font-mono text-xs text-white/60 uppercase tracking-wider">
+                    <span className="font-mono text-[10px] sm:text-xs text-white/60 uppercase tracking-wider">
                       System Prompt
                     </span>
                   </div>
                   
-                  {/* Prompt Content - Scrollable */}
                   <div className="flex-1 overflow-y-auto min-h-0">
-                    <div className="p-4">
-                      <pre className="font-mono text-xs text-white/60 whitespace-pre-wrap leading-relaxed">
+                    <div className="p-3 sm:p-4">
+                      <pre className="font-mono text-[10px] sm:text-xs text-white/60 whitespace-pre-wrap leading-relaxed">
                         {systemPrompt || "Preparing prompt..."}
                       </pre>
                     </div>
                   </div>
                 </div>
 
-                {/* Middle Column: Agent 1 Response */}
-                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-0">
-                  <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
-                    <Brain className="w-4 h-4 text-blue-400" />
-                    <span className="font-mono text-xs text-white/60 uppercase tracking-wider">
+                {/* Agent 1 Response */}
+                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-[200px] sm:min-h-[250px] max-h-[35vh] md:max-h-none">
+                  <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
+                    <Brain className="w-3 h-3 sm:w-4 sm:h-4 text-blue-400" />
+                    <span className="font-mono text-[10px] sm:text-xs text-white/60 uppercase tracking-wider truncate">
                       {getShortModelName(agent1Model)}
                     </span>
                     {isProcessing && !agent1Thought.isComplete && (
-                      <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto" />
+                      <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto shrink-0" />
                     )}
                   </div>
                   
-                  {/* Response Content - Scrollable */}
                   <div className="flex-1 overflow-y-auto min-h-0">
-                    <div className="p-4">
-                      <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
+                    <div className="p-3 sm:p-4">
+                      <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
                         {agent1Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
                         {isProcessing && !agent1Thought.isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
@@ -547,12 +547,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                     </div>
                   </div>
                   
-                  {/* Decision Footer */}
                   {rounds.length > 0 && (
-                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
-                      <span className="font-mono text-xs text-white/40">Decision:</span>
+                    <div className="px-3 sm:px-4 py-2 sm:py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
+                      <span className="font-mono text-[10px] sm:text-xs text-white/40">Decision:</span>
                       <span
-                        className={`font-mono text-sm font-bold ${
+                        className={`font-mono text-xs sm:text-sm font-bold ${
                           rounds[rounds.length - 1]?.agent1Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
                         }`}
                       >
@@ -562,22 +561,21 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   )}
                 </div>
 
-                {/* Right Column: Agent 2 Response */}
-                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-0">
-                  <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
-                    <Brain className="w-4 h-4 text-purple-400" />
-                    <span className="font-mono text-xs text-white/60 uppercase tracking-wider">
+                {/* Agent 2 Response */}
+                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-[200px] sm:min-h-[250px] max-h-[35vh] md:max-h-none">
+                  <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
+                    <Brain className="w-3 h-3 sm:w-4 sm:h-4 text-purple-400" />
+                    <span className="font-mono text-[10px] sm:text-xs text-white/60 uppercase tracking-wider truncate">
                       {getShortModelName(agent2Model)}
                     </span>
                     {isProcessing && !agent2Thought.isComplete && (
-                      <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto" />
+                      <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto shrink-0" />
                     )}
                   </div>
                   
-                  {/* Response Content - Scrollable */}
                   <div className="flex-1 overflow-y-auto min-h-0">
-                    <div className="p-4">
-                      <p className="font-mono text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
+                    <div className="p-3 sm:p-4">
+                      <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
                         {agent2Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
                         {isProcessing && !agent2Thought.isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
@@ -586,12 +584,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                     </div>
                   </div>
                   
-                  {/* Decision Footer */}
                   {rounds.length > 0 && (
-                    <div className="px-4 py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
-                      <span className="font-mono text-xs text-white/40">Decision:</span>
+                    <div className="px-3 sm:px-4 py-2 sm:py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
+                      <span className="font-mono text-[10px] sm:text-xs text-white/40">Decision:</span>
                       <span
-                        className={`font-mono text-sm font-bold ${
+                        className={`font-mono text-xs sm:text-sm font-bold ${
                           rounds[rounds.length - 1]?.agent2Decision === "cooperate" ? "text-emerald-400" : "text-red-400"
                         }`}
                       >
@@ -602,8 +599,9 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 </div>
               </div>
 
-              {/* Round History Strip */}
-              <div className="mt-4 flex items-center gap-2 justify-center">
+              {/* Round History Strip - Scrollable on mobile */}
+              <div className="mt-3 sm:mt-4 w-full overflow-x-auto scrollbar-hide">
+                <div className="flex items-center gap-1.5 sm:gap-2 justify-center min-w-max px-2">
                 {Array.from({ length: TOTAL_ROUNDS }).map((_, i) => {
                   const round = rounds[i]
                   const isCurrent = i === currentRound - 1 && gameState === "playing"
@@ -612,11 +610,11 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                     return (
                       <div
                         key={i}
-                        className={`w-8 h-8 border ${
+                        className={`w-6 h-6 sm:w-8 sm:h-8 border shrink-0 ${
                           isCurrent ? "border-white/50 animate-pulse" : "border-white/10"
                         } flex items-center justify-center`}
                       >
-                        <span className="font-mono text-[10px] text-white/30">{i + 1}</span>
+                        <span className="font-mono text-[8px] sm:text-[10px] text-white/30">{i + 1}</span>
                       </div>
                     )
                   }
@@ -629,21 +627,22 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       key={i}
                       initial={{ scale: 0.8, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
-                      className="w-8 h-8 border border-white/20 flex items-center justify-center gap-0.5"
+                      className="w-6 h-6 sm:w-8 sm:h-8 border border-white/20 flex items-center justify-center gap-0.5 shrink-0"
                     >
                       <div
-                        className={`w-2 h-2 rounded-full ${
+                        className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
                           round.agent1Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
                         } ${a1Won ? "ring-1 ring-white" : ""}`}
                       />
                       <div
-                        className={`w-2 h-2 rounded-full ${
+                        className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
                           round.agent2Decision === "cooperate" ? "bg-emerald-400" : "bg-red-400"
                         } ${a2Won ? "ring-1 ring-white" : ""}`}
                       />
                     </motion.div>
                   )
                 })}
+                </div>
               </div>
 
               {/* Complete Actions */}
@@ -651,18 +650,18 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex gap-4 justify-center mt-6"
+                  className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center mt-4 sm:mt-6"
                 >
                   <Button
                     onClick={resetGame}
                     variant="outline"
-                    className="font-mono text-sm uppercase tracking-wider border-white/15 bg-transparent text-white/80 hover:bg-white/5 px-8"
+                    className="font-mono text-xs sm:text-sm uppercase tracking-wider border-white/15 bg-transparent text-white/80 hover:bg-white/5 px-6 sm:px-8"
                   >
                     Play Again
                   </Button>
                   <Button
                     onClick={handleClose}
-                    className="font-mono text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 px-8"
+                    className="font-mono text-xs sm:text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 px-6 sm:px-8"
                   >
                     Close
                   </Button>

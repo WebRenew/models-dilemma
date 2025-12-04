@@ -4,7 +4,7 @@ export default defineConfig({
   project: "proj_umahaiggmgazqnejfved",
   runtime: "node",
   logLevel: "log",
-  maxDuration: 3600, // 1 hour max for long tournaments
+  maxDuration: 3600, // 1 hour default - tasks can override with their own maxDuration
   retries: {
     enabledInDev: true,
     default: {

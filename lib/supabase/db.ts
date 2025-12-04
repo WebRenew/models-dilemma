@@ -393,6 +393,74 @@ export async function fetchRecentGames(limit = 50): Promise<GameRecord[]> {
   return games
 }
 
+export async function fetchOlderGames(beforeTimestamp: number, limit = 50): Promise<GameRecord[]> {
+  const supabase = createClient()
+  const isoTimestamp = new Date(beforeTimestamp).toISOString()
+
+  // Step 1: Get final rounds for older games
+  const { data: finalRounds, error: finalError } = await supabase
+    .from("game_rounds")
+    .select("game_id, agent1_model_id, agent2_model_id, agent1_display_name, agent2_display_name, agent1_cumulative_score, agent2_cumulative_score, game_winner, game_timestamp, game_type, scenario")
+    .eq("is_final_round", true)
+    .lt("game_timestamp", isoTimestamp)
+    .order("game_timestamp", { ascending: false })
+    .limit(limit)
+
+  if (finalError || !finalRounds || finalRounds.length === 0) {
+    return []
+  }
+
+  // Step 2: Get ALL rounds for these games in ONE query
+  const gameIds = finalRounds.map((r) => r.game_id)
+  const { data: allRoundsData, error: roundsError } = await supabase
+    .from("game_rounds")
+    .select("game_id, round_number, agent1_decision, agent2_decision, agent1_round_points, agent2_round_points, agent1_reasoning, agent2_reasoning")
+    .in("game_id", gameIds)
+    .order("round_number", { ascending: true })
+
+  if (roundsError || !allRoundsData) {
+    return []
+  }
+
+  // Step 3: Group rounds by game_id in memory
+  const roundsByGame = new Map<string, typeof allRoundsData>()
+  for (const round of allRoundsData) {
+    const existing = roundsByGame.get(round.game_id) || []
+    existing.push(round)
+    roundsByGame.set(round.game_id, existing)
+  }
+
+  // Step 4: Build game records
+  return finalRounds.map((finalRound) => {
+    const gameRounds = roundsByGame.get(finalRound.game_id) || []
+    
+    const rounds: RoundResult[] = gameRounds.map((r) => ({
+      round: r.round_number,
+      agent1Decision: r.agent1_decision,
+      agent2Decision: r.agent2_decision,
+      agent1Points: r.agent1_round_points,
+      agent2Points: r.agent2_round_points,
+      agent1Reasoning: r.agent1_reasoning || undefined,
+      agent2Reasoning: r.agent2_reasoning || undefined,
+    }))
+
+    return {
+      id: finalRound.game_id,
+      agent1Model: finalRound.agent1_model_id,
+      agent2Model: finalRound.agent2_model_id,
+      agent1DisplayName: finalRound.agent1_display_name,
+      agent2DisplayName: finalRound.agent2_display_name,
+      rounds,
+      agent1TotalScore: finalRound.agent1_cumulative_score,
+      agent2TotalScore: finalRound.agent2_cumulative_score,
+      winner: finalRound.game_winner || "tie",
+      timestamp: new Date(finalRound.game_timestamp).getTime(),
+      framing: finalRound.game_type === "hidden_agenda" ? "cloaked" : "overt",
+      scenario: finalRound.scenario || null,
+    }
+  })
+}
+
 export async function fetchNewGames(afterTimestamp: number): Promise<GameRecord[]> {
   const supabase = createClient()
   const isoTimestamp = new Date(afterTimestamp).toISOString()

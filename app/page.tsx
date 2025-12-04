@@ -135,7 +135,7 @@ export default function Home() {
         </div>
       )}
 
-      <header className="relative top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6">
+      <header className="relative top-0 left-0 right-0 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6">
         <div className="font-mono text-xs sm:text-sm tracking-wider flex items-center gap-4">
           <ScrambleTextOnHover 
             text="The Model's Dilemma" 
@@ -160,7 +160,7 @@ export default function Home() {
       </header>
 
       <div className="flex flex-col lg:flex-row min-h-screen">
-        <div className="w-full lg:w-[60%] flex flex-col justify-center px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:pb-12 overflow-visible z-10">
+        <div className="w-full lg:w-[60%] flex flex-col justify-center px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:pb-12 overflow-visible">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
             <h1 className="font-mono text-3xl sm:text-4xl lg:text-5xl xl:text-6xl text-white leading-tight mb-4 sm:mb-6 text-balance">
               <ScrambleText text="The Model's Dilemma" delayMs={200} duration={1.2} />

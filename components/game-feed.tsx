@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import type { GameRecord, Decision } from "@/lib/game-logic"
-import { fetchRecentGames, fetchNewGames } from "@/lib/supabase/db"
+import { fetchRecentGames, fetchNewGames, fetchOlderGames } from "@/lib/supabase/db"
 import { createClient } from "@/lib/supabase/client"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { GameReplayModal } from "@/components/game-replay-modal"
+import { LiveGameModal } from "@/components/live-game-modal"
 
 interface GameFeedProps {
   userGames?: GameRecord[]
@@ -123,7 +125,7 @@ function FramingIndicator({ framing, scenario }: { framing: "overt" | "cloaked" 
 }
 
 // Live match row - shows in-progress matches
-function LiveMatchRow({ match }: { match: LiveMatch }) {
+function LiveMatchRow({ match, onClick }: { match: LiveMatch; onClick: () => void }) {
   const pendingRounds = match.totalRounds - match.rounds.length
   const isStarting = match.rounds.length === 0
   const currentRound = match.currentRound || match.rounds.length
@@ -133,7 +135,8 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
       initial={{ opacity: 0, y: -20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 25 }}
-      className="flex flex-col gap-2 py-4 border-l-2 border-emerald-500 pl-2 sm:pl-4 -ml-2 sm:-ml-4 bg-emerald-500/5"
+      onClick={onClick}
+      className="flex flex-col gap-2 py-4 border-l-2 border-emerald-500 pl-2 sm:pl-4 -ml-2 sm:-ml-4 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10 transition-colors"
     >
       {/* Status indicator */}
       <div className="flex items-center gap-2 mb-1">
@@ -240,7 +243,7 @@ function LiveMatchRow({ match }: { match: LiveMatch }) {
   )
 }
 
-function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
+function GameRow({ game, isNew, onClick }: { game: GameRecord; isNew: boolean; onClick: () => void }) {
   const gameWinner = game.winner
 
   return (
@@ -248,7 +251,8 @@ function GameRow({ game, isNew }: { game: GameRecord; isNew: boolean }) {
       initial={isNew ? { opacity: 0, y: -20 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="flex flex-col gap-2 py-4"
+      onClick={onClick}
+      className="flex flex-col gap-2 py-4 cursor-pointer hover:bg-white/[0.02] -mx-2 sm:-mx-4 px-2 sm:px-4 transition-colors"
     >
       {/* Header with framing indicator - mobile only */}
       <div className="flex items-center justify-between mb-1 sm:hidden">
@@ -313,8 +317,25 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
   const [dbGames, setDbGames] = useState<GameRecord[]>([])
   const [liveMatches, setLiveMatches] = useState<LiveMatch[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [selectedGame, setSelectedGame] = useState<GameRecord | null>(null)
+  const [isReplayModalOpen, setIsReplayModalOpen] = useState(false)
+  const [selectedLiveMatch, setSelectedLiveMatch] = useState<LiveMatch | null>(null)
+  const [isLiveModalOpen, setIsLiveModalOpen] = useState(false)
   const lastFetchTimeRef = useRef<number>(Date.now())
   const seenGameIdsRef = useRef<Set<string>>(new Set())
+  const oldestTimestampRef = useRef<number | null>(null)
+
+  const handleGameClick = useCallback((game: GameRecord) => {
+    setSelectedGame(game)
+    setIsReplayModalOpen(true)
+  }, [])
+
+  const handleLiveMatchClick = useCallback((match: LiveMatch) => {
+    setSelectedLiveMatch(match)
+    setIsLiveModalOpen(true)
+  }, [])
 
   // Combine user games and db games, sorted by timestamp
   const allGames = [...userGames, ...dbGames]
@@ -398,6 +419,34 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
     setLiveMatches(liveGames)
   }, [])
 
+  // Load more games (pagination)
+  const loadMoreGames = useCallback(async () => {
+    if (isLoadingMore || !hasMore || !oldestTimestampRef.current) return
+    
+    setIsLoadingMore(true)
+    const olderGames = await fetchOlderGames(oldestTimestampRef.current, 50)
+    
+    if (olderGames.length === 0) {
+      setHasMore(false)
+    } else {
+      olderGames.forEach((g) => seenGameIdsRef.current.add(g.id))
+      setDbGames((prev) => [...prev, ...olderGames])
+      
+      // Update oldest timestamp
+      const oldest = olderGames[olderGames.length - 1]
+      if (oldest) {
+        oldestTimestampRef.current = oldest.timestamp
+      }
+      
+      // If we got fewer than requested, no more to load
+      if (olderGames.length < 50) {
+        setHasMore(false)
+      }
+    }
+    
+    setIsLoadingMore(false)
+  }, [isLoadingMore, hasMore])
+
   // Initial load of games from Supabase
   useEffect(() => {
     const loadInitialGames = async () => {
@@ -405,6 +454,16 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
       const games = await fetchRecentGames(50)
       games.forEach((g) => seenGameIdsRef.current.add(g.id))
       setDbGames(games)
+      
+      // Track oldest timestamp for pagination
+      if (games.length > 0) {
+        const oldest = games[games.length - 1]
+        oldestTimestampRef.current = oldest.timestamp
+        setHasMore(games.length >= 50) // May have more if we got a full batch
+      } else {
+        setHasMore(false)
+      }
+      
       await fetchLiveMatches()
       setIsLoading(false)
       lastFetchTimeRef.current = Date.now()
@@ -425,10 +484,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
       if (trulyNewGames.length > 0) {
         console.log('[pollNewGames] Adding', trulyNewGames.length, 'new games to feed')
         trulyNewGames.forEach((g) => seenGameIdsRef.current.add(g.id))
-        setDbGames((prev) => {
-          const combined = [...trulyNewGames, ...prev]
-          return combined.slice(0, 100) // Keep last 100 games
-        })
+        setDbGames((prev) => [...trulyNewGames, ...prev])
 
         // Notify parent of new games
         trulyNewGames.forEach((g) => onNewGame?.(g))
@@ -484,10 +540,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
             
             if (trulyNewGames.length > 0) {
               trulyNewGames.forEach((g) => seenGameIdsRef.current.add(g.id))
-              setDbGames((prev) => {
-                const combined = [...trulyNewGames, ...prev]
-                return combined.slice(0, 100)
-              })
+              setDbGames((prev) => [...trulyNewGames, ...prev])
               trulyNewGames.forEach((g) => onNewGame?.(g))
               lastFetchTimeRef.current = Date.now()
             }
@@ -504,46 +557,116 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
   }, [onNewGame, fetchLiveMatches])
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto scrollbar-hide px-2 sm:px-4 lg:px-6">
-      <AnimatePresence mode="popLayout">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-white/50 font-mono text-sm">Loading games...</p>
-          </div>
-        ) : (
-          <div className="flex flex-col divide-y divide-white/10">
-            {/* Live matches at the top */}
-            {liveMatches.length > 0 && (
-              <div className="pb-4">
-                <div className="flex items-center gap-2 mb-2 py-2">
-                  <motion.div
-                    animate={{ scale: [1, 1.3, 1] }}
-                    transition={{ duration: 1.5, repeat: Infinity }}
-                    className="w-2 h-2 rounded-full bg-emerald-500"
-                  />
-                  <span className="text-emerald-400 font-mono text-xs uppercase tracking-wider">
-                    {liveMatches.length} Live {liveMatches.length === 1 ? "Match" : "Matches"}
-                  </span>
-                </div>
+    <>
+      <div ref={containerRef} className="h-full overflow-y-auto scrollbar-hide px-2 sm:px-4 lg:px-6">
+        <AnimatePresence mode="popLayout">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-white/50 font-mono text-sm">Loading games...</p>
+            </div>
+          ) : (
+            <div className="flex flex-col divide-y divide-white/10">
+              {/* Live matches at the top */}
+              {liveMatches.length > 0 && (
+                <div className="pb-4">
+                  <div className="flex items-center gap-2 mb-2 py-2">
+                    <motion.div
+                      animate={{ scale: [1, 1.3, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      className="w-2 h-2 rounded-full bg-emerald-500"
+                    />
+                    <span className="text-emerald-400 font-mono text-xs uppercase tracking-wider">
+                      {liveMatches.length} Live {liveMatches.length === 1 ? "Match" : "Matches"}
+                    </span>
+                  </div>
                 {liveMatches.map((match) => (
-                  <LiveMatchRow key={match.id} match={match} />
+                  <LiveMatchRow 
+                    key={match.id} 
+                    match={match} 
+                    onClick={() => handleLiveMatchClick(match)}
+                  />
                 ))}
-              </div>
-            )}
+                </div>
+              )}
 
-            {/* Completed games */}
-            {allGames.length === 0 && liveMatches.length === 0 ? (
-              <div className="flex items-center justify-center h-64">
-                <p className="text-white/50 font-mono text-sm">Waiting for games...</p>
-              </div>
-            ) : (
-              allGames.map((game, index) => (
-                <GameRow key={game.id} game={game} isNew={index === 0} />
-              ))
-            )}
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
+              {/* Completed games */}
+              {allGames.length === 0 && liveMatches.length === 0 ? (
+                <div className="flex items-center justify-center h-64">
+                  <p className="text-white/50 font-mono text-sm">Waiting for games...</p>
+                </div>
+              ) : (
+                <>
+                  {allGames.map((game, index) => (
+                    <GameRow 
+                      key={game.id} 
+                      game={game} 
+                      isNew={index === 0} 
+                      onClick={() => handleGameClick(game)}
+                    />
+                  ))}
+                  
+                  {/* Load More Button */}
+                  {hasMore && allGames.length > 0 && (
+                    <div className="py-6 flex justify-center">
+                      <button
+                        onClick={loadMoreGames}
+                        disabled={isLoadingMore}
+                        className="px-6 py-2 border border-white/20 text-white/60 hover:text-white hover:border-white/40 font-mono text-xs uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isLoadingMore ? (
+                          <span className="flex items-center gap-2">
+                            <motion.div
+                              animate={{ rotate: 360 }}
+                              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                              className="w-3 h-3 border border-white/40 border-t-white rounded-full"
+                            />
+                            Loading...
+                          </span>
+                        ) : (
+                          "Load More Games"
+                        )}
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* End of history message */}
+                  {!hasMore && allGames.length > 0 && (
+                    <div className="py-6 flex justify-center">
+                      <p className="text-white/30 font-mono text-xs">End of match history</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+      
+      {/* Game Replay Modal */}
+      <GameReplayModal
+        isOpen={isReplayModalOpen}
+        onClose={() => setIsReplayModalOpen(false)}
+        game={selectedGame}
+      />
+      
+      {/* Live Game Modal */}
+      <LiveGameModal
+        isOpen={isLiveModalOpen}
+        onClose={() => setIsLiveModalOpen(false)}
+        gameId={selectedLiveMatch?.id ?? null}
+        initialData={selectedLiveMatch ? {
+          modelA: selectedLiveMatch.modelA,
+          modelB: selectedLiveMatch.modelB,
+          modelAName: selectedLiveMatch.modelAName,
+          modelBName: selectedLiveMatch.modelBName,
+          scenario: selectedLiveMatch.scenario,
+          framing: selectedLiveMatch.framing,
+          totalRounds: selectedLiveMatch.totalRounds,
+          rounds: selectedLiveMatch.rounds,
+          scoreA: selectedLiveMatch.scoreA,
+          scoreB: selectedLiveMatch.scoreB,
+        } : null}
+      />
+    </>
   )
 }

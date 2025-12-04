@@ -166,7 +166,7 @@ export async function fetchGameStats() {
   }
 }
 
-export async function fetchModelRankings(limit = 10) {
+export async function fetchModelRankings(limit = 10, activeModelIds?: string[]) {
   const supabase = createClient()
 
   // Get only needed columns for ranking calculation (not select("*"))
@@ -228,7 +228,14 @@ export async function fetchModelRankings(limit = 10) {
     if (agent1Won) modelStats[round.agent2_model_id].losses += 1
   }
 
-  return Object.values(modelStats)
+  // Filter to only active models if specified
+  let rankings = Object.values(modelStats)
+  if (activeModelIds && activeModelIds.length > 0) {
+    const activeSet = new Set(activeModelIds)
+    rankings = rankings.filter((m) => activeSet.has(m.modelId))
+  }
+
+  return rankings
     .sort((a, b) => {
       // Primary: sort by wins (descending)
       if (b.wins !== a.wins) return b.wins - a.wins

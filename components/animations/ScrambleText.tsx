@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import gsap from "gsap"
 
 interface ScrambleTextProps {
@@ -12,12 +12,62 @@ interface ScrambleTextProps {
   duration?: number
 }
 
+interface ScrambleTextOnHoverProps {
+  text: string
+  className?: string
+  /** Duration of the scramble animation in seconds */
+  duration?: number
+  /** Element type to render */
+  as?: "span" | "button" | "div"
+  /** onClick handler for buttons */
+  onClick?: () => void
+}
+
 const GLYPHS = "!@#$%^&*()_+-=<>?/\\[]{}Xx"
 
 /**
- * Scramble text animation component.
- * Characters rapidly flip through random glyphs before locking
- * left-to-right into the final text.
+ * Run the scramble animation on text
+ */
+function runScrambleAnimation(
+  text: string,
+  duration: number,
+  setDisplayText: (text: string) => void,
+  onComplete?: () => void,
+): gsap.core.Tween {
+  const lockedIndices = new Set<number>()
+  const finalChars = text.split("")
+  const totalChars = finalChars.length
+  const scrambleObj = { progress: 0 }
+
+  return gsap.to(scrambleObj, {
+    progress: 1,
+    duration,
+    ease: "power2.out",
+    onUpdate: () => {
+      const numLocked = Math.floor(scrambleObj.progress * totalChars)
+      
+      for (let i = 0; i < numLocked; i++) {
+        lockedIndices.add(i)
+      }
+      
+      const newDisplay = finalChars
+        .map((char, i) => {
+          if (lockedIndices.has(i)) return char
+          return GLYPHS[Math.floor(Math.random() * GLYPHS.length)]
+        })
+        .join("")
+      
+      setDisplayText(newDisplay)
+    },
+    onComplete: () => {
+      setDisplayText(text)
+      onComplete?.()
+    },
+  })
+}
+
+/**
+ * Scramble text animation component - animates on mount.
  */
 export function ScrambleText({
   text,
@@ -30,7 +80,6 @@ export function ScrambleText({
   const hasAnimated = useRef(false)
 
   useEffect(() => {
-    // Prevent re-animation on re-renders
     if (hasAnimated.current) return
     if (!text) {
       setDisplayText("")
@@ -46,50 +95,8 @@ export function ScrambleText({
       .join("")
     setDisplayText(scrambledStart)
 
-    // Track which characters have "locked in"
-    const lockedIndices = new Set<number>()
-    const finalChars = text.split("")
-    const totalChars = finalChars.length
-
-    // Calculate timing: each character locks ~equally spaced across duration
-    const lockInterval = duration / totalChars
-
-    // Start the animation after the specified delay
     const timeoutId = setTimeout(() => {
-      // Rapid scramble effect using GSAP ticker
-      const scrambleObj = { progress: 0 }
-      
-      gsap.to(scrambleObj, {
-        progress: 1,
-        duration,
-        ease: "power2.out",
-        onUpdate: () => {
-          // Determine how many characters should be locked based on progress
-          const numLocked = Math.floor(scrambleObj.progress * totalChars)
-          
-          // Lock new characters left-to-right
-          for (let i = 0; i < numLocked; i++) {
-            lockedIndices.add(i)
-          }
-          
-          // Build display string
-          const newDisplay = finalChars
-            .map((char, i) => {
-              if (lockedIndices.has(i)) {
-                return char // Locked character
-              }
-              // Still scrambling - pick random glyph
-              return GLYPHS[Math.floor(Math.random() * GLYPHS.length)]
-            })
-            .join("")
-          
-          setDisplayText(newDisplay)
-        },
-        onComplete: () => {
-          // Ensure final text is exactly correct
-          setDisplayText(text)
-        },
-      })
+      runScrambleAnimation(text, duration, setDisplayText)
     }, delayMs)
 
     return () => {
@@ -102,6 +109,59 @@ export function ScrambleText({
     <span ref={containerRef} className={className}>
       {displayText}
     </span>
+  )
+}
+
+/**
+ * Scramble text animation component - animates on hover.
+ */
+export function ScrambleTextOnHover({
+  text,
+  className,
+  duration = 0.4,
+  as: Component = "span",
+  onClick,
+}: ScrambleTextOnHoverProps) {
+  const [displayText, setDisplayText] = useState(text)
+  const isAnimating = useRef(false)
+  const tweenRef = useRef<gsap.core.Tween | null>(null)
+
+  const handleMouseEnter = useCallback(() => {
+    if (isAnimating.current) return
+    isAnimating.current = true
+    
+    // Kill any existing animation
+    if (tweenRef.current) {
+      tweenRef.current.kill()
+    }
+    
+    // Start with scrambled
+    const scrambledStart = text
+      .split("")
+      .map(() => GLYPHS[Math.floor(Math.random() * GLYPHS.length)])
+      .join("")
+    setDisplayText(scrambledStart)
+    
+    tweenRef.current = runScrambleAnimation(text, duration, setDisplayText, () => {
+      isAnimating.current = false
+    })
+  }, [text, duration])
+
+  // Update display text if text prop changes
+  useEffect(() => {
+    if (!isAnimating.current) {
+      setDisplayText(text)
+    }
+  }, [text])
+
+  return (
+    <Component
+      className={className}
+      onMouseEnter={handleMouseEnter}
+      onClick={onClick}
+    >
+      {displayText}
+    </Component>
   )
 }
 

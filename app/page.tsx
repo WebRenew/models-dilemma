@@ -13,9 +13,13 @@ import { PlayGameModal } from "@/components/play-game-modal"
 import { ExperimentDesign } from "@/components/experiment-design"
 import { Footer } from "@/components/footer"
 import { StatsSkeleton, RankingsSkeleton, StrategyStatsSkeleton, RoundsCardSkeleton } from "@/components/ui/skeleton"
+import { ScrambleText, ScrambleTextOnHover } from "@/components/animations/ScrambleText"
 import type { GameRecord } from "@/lib/game-logic"
-import { MODEL_COUNT } from "@/lib/models"
+import { MODEL_COUNT, AI_MODELS } from "@/lib/models"
 import { fetchGameStats, fetchModelRankings, exportGameDataCSV, fetchStrategyStats } from "@/lib/supabase/db"
+
+// Get active model IDs for filtering rankings
+const ACTIVE_MODEL_IDS = AI_MODELS.map((m) => m.id)
 import Link from "next/link"
 
 export default function Home() {
@@ -44,9 +48,10 @@ export default function Home() {
   const loadStats = useCallback(async (showLoading = false) => {
     if (showLoading) setIsLoading(true)
     // Fetch all stats in parallel for faster loading
+    // Pass active model IDs to filter out old/inactive models from rankings
     const [stats, rankings, strategies] = await Promise.all([
       fetchGameStats(),
-      fetchModelRankings(10),
+      fetchModelRankings(10, ACTIVE_MODEL_IDS),
       fetchStrategyStats(),
     ])
     setDbStats(stats)
@@ -132,7 +137,11 @@ export default function Home() {
 
       <header className="relative top-0 left-0 right-0 z-40 flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6">
         <div className="font-mono text-xs sm:text-sm tracking-wider flex items-center gap-4">
-          <span className="opacity-80">The Model&apos;s Dilemma</span>
+          <ScrambleTextOnHover 
+            text="The Model's Dilemma" 
+            className="opacity-80 cursor-default"
+            duration={0.5}
+          />
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
           <Link
@@ -154,28 +163,29 @@ export default function Home() {
         <div className="w-full lg:w-[60%] flex flex-col justify-center px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 py-8 lg:pb-12 overflow-visible z-10">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
             <h1 className="font-mono text-3xl sm:text-4xl lg:text-5xl xl:text-6xl text-white leading-tight mb-4 sm:mb-6 text-balance">
-              The Model&apos;s Dilemma
+              <ScrambleText text="The Model's Dilemma" delayMs={200} duration={1.2} />
             </h1>
             <p className="text-white/80 max-w-lg mb-6 sm:mb-8 leading-relaxed text-sm sm:text-base">
               A recreation of Robert Axelrod&apos;s 1984 experiment on Game Theory&apos;s classic thought experiment the
               Prisoner&apos;s Dilemma.
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
-              <Button
+              <ScrambleTextOnHover
+                as="button"
+                text="Experiment Design"
+                duration={0.4}
                 onClick={() => {
                   document.getElementById("experiment-design")?.scrollIntoView({ behavior: "smooth" })
                 }}
-                variant="outline"
-                className="font-mono text-xs sm:text-sm uppercase tracking-wider border-white/15 bg-transparent text-white hover:bg-white/5 px-4 sm:px-6 py-4 sm:py-5"
-              >
-                Experiment Design
-              </Button>
-              <Button
+                className="font-mono text-xs sm:text-sm uppercase tracking-wider border border-white/15 bg-transparent text-white hover:bg-white/5 px-4 sm:px-6 py-4 sm:py-5 rounded-md cursor-pointer transition-colors"
+              />
+              <ScrambleTextOnHover
+                as="button"
+                text="Play Game"
+                duration={0.4}
                 onClick={() => setPlayGameOpen(true)}
-                className="font-mono text-xs sm:text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 px-4 sm:px-6 py-4 sm:py-5"
-              >
-                Play Game
-              </Button>
+                className="font-mono text-xs sm:text-sm uppercase tracking-wider bg-white text-black hover:bg-white/90 px-4 sm:px-6 py-4 sm:py-5 rounded-md cursor-pointer transition-colors"
+              />
             </div>
           </motion.div>
 

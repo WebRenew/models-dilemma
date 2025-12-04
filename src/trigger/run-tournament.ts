@@ -12,7 +12,7 @@ type Scenario = (typeof SCENARIOS)[number];
 type CloakedScenario = "sales" | "research" | "creator";
 
 const DELAY_BETWEEN_GAMES_MS = 90_000; // 90 seconds between games (rate limit protection)
-const DELAY_BETWEEN_ROUNDS_MS = 5_000; // 5 seconds between rounds for live streaming
+const DELAY_BETWEEN_ROUNDS_MS = 1_000; // 1 second between rounds (minimal delay for live streaming)
 const STREAMER_DURATION_HOURS = 4;
 const STREAMER_DURATION_MS = STREAMER_DURATION_HOURS * 60 * 60 * 1000;
 
@@ -731,5 +731,188 @@ export const runTournamentTask = task({
     });
 
     return { successful, failed, scenarioCounts };
+  },
+});
+
+// =============================================================================
+// High-Throughput Tournament Runner
+// Runs 4 concurrent games, prioritizes models with fewer games for balance
+// =============================================================================
+
+async function getModelGameCounts(): Promise<Map<string, number>> {
+  const supabase = getSupabaseClient();
+  
+  const { data: finalRounds } = await supabase
+    .from("game_rounds")
+    .select("agent1_model_id, agent2_model_id")
+    .eq("is_final_round", true);
+
+  const counts = new Map<string, number>();
+  
+  // Initialize all models with 0
+  for (const model of AI_MODELS) {
+    counts.set(model, 0);
+  }
+  
+  if (finalRounds) {
+    for (const round of finalRounds) {
+      // Only count if model is in our active list
+      if (AI_MODELS.includes(round.agent1_model_id)) {
+        counts.set(round.agent1_model_id, (counts.get(round.agent1_model_id) || 0) + 1);
+      }
+      if (AI_MODELS.includes(round.agent2_model_id)) {
+        counts.set(round.agent2_model_id, (counts.get(round.agent2_model_id) || 0) + 1);
+      }
+    }
+  }
+  
+  return counts;
+}
+
+function pickModelsByGameCount(modelCounts: Map<string, number>, excludeModels: string[] = []): [string, string] {
+  // Sort models by game count (ascending) - models with fewer games first
+  const available = AI_MODELS
+    .filter(m => !excludeModels.includes(m))
+    .map(m => ({ model: m, count: modelCounts.get(m) || 0 }))
+    .sort((a, b) => a.count - b.count);
+  
+  if (available.length < 2) {
+    // Fallback to random if not enough models available
+    const shuffled = [...AI_MODELS].sort(() => Math.random() - 0.5);
+    return [shuffled[0], shuffled[1]];
+  }
+  
+  // Pick the two models with fewest games
+  // Add some randomization among models with similar counts to avoid always same pairs
+  const minCount = available[0].count;
+  const lowGameModels = available.filter(m => m.count <= minCount + 5);
+  
+  // Shuffle among low-game models and pick 2
+  const shuffled = lowGameModels.sort(() => Math.random() - 0.5);
+  return [shuffled[0].model, shuffled[1].model];
+}
+
+export const fastTournamentTask = task({
+  id: "fast-tournament",
+  maxDuration: 14400, // 4 hours max
+  run: async (payload: { 
+    games?: number; 
+    concurrency?: number;
+    scenario?: Scenario;
+  }) => {
+    const gamesToRun = payload.games || 100;
+    const concurrency = payload.concurrency || 4;
+    const forcedScenario = payload.scenario;
+    
+    logger.info("🚀 Fast tournament starting", { 
+      gamesToRun,
+      concurrency,
+      forcedScenario: forcedScenario || "balanced",
+      models: AI_MODELS.length,
+    });
+
+    const startTime = Date.now();
+    let completed = 0;
+    let successful = 0;
+    let failed = 0;
+    const scenarioCounts: Record<Scenario, number> = { overt: 0, sales: 0, research: 0, creator: 0 };
+    
+    // Get initial game counts per model
+    let modelCounts = await getModelGameCounts();
+    logger.info("📊 Initial model game counts", {
+      counts: Object.fromEntries(modelCounts),
+    });
+
+    // Process games in batches of `concurrency`
+    while (completed < gamesToRun) {
+      const batchSize = Math.min(concurrency, gamesToRun - completed);
+      const batchPromises: Promise<{ success: boolean; modelA: string; modelB: string; scenario: Scenario }>[] = [];
+      
+      // Track models being used in this batch to avoid duplicates
+      const modelsInBatch: string[] = [];
+      
+      for (let i = 0; i < batchSize; i++) {
+        // Pick models prioritizing those with fewer games
+        const [modelA, modelB] = pickModelsByGameCount(modelCounts, modelsInBatch);
+        modelsInBatch.push(modelA, modelB);
+        
+        // Temporarily increment counts to balance within batch
+        modelCounts.set(modelA, (modelCounts.get(modelA) || 0) + 1);
+        modelCounts.set(modelB, (modelCounts.get(modelB) || 0) + 1);
+        
+        // Rotate scenarios: each game in batch gets different scenario (overt, sales, research, creator)
+        const scenario = forcedScenario || SCENARIOS[i % SCENARIOS.length];
+        scenarioCounts[scenario]++;
+        
+        const shortA = modelA.split("/")[1] || modelA;
+        const shortB = modelB.split("/")[1] || modelB;
+        
+        logger.info(`🎮 [${completed + i + 1}/${gamesToRun}] Queuing`, {
+          modelA: shortA,
+          modelB: shortB,
+          scenario,
+          batch: Math.floor(completed / concurrency) + 1,
+        });
+        
+        // Start game (no await - run concurrently)
+        batchPromises.push(
+          runGame(modelA, modelB, scenario).then(result => ({
+            success: result.success,
+            modelA,
+            modelB,
+            scenario,
+          }))
+        );
+      }
+      
+      // Wait for all games in batch to complete
+      const batchResults = await Promise.all(batchPromises);
+      
+      for (const result of batchResults) {
+        completed++;
+        if (result.success) {
+          successful++;
+        } else {
+          failed++;
+          // Decrement counts for failed games so they get retried
+          modelCounts.set(result.modelA, Math.max(0, (modelCounts.get(result.modelA) || 1) - 1));
+          modelCounts.set(result.modelB, Math.max(0, (modelCounts.get(result.modelB) || 1) - 1));
+        }
+      }
+      
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+      const gamesPerMin = (completed / (parseInt(elapsed) / 60)).toFixed(1);
+      
+      logger.info(`📊 Batch complete`, {
+        completed,
+        total: gamesToRun,
+        successful,
+        failed,
+        elapsed: `${elapsed}s`,
+        rate: `${gamesPerMin} games/min`,
+        scenarioCounts,
+      });
+      
+      // Refresh model counts from DB every 20 games to stay accurate
+      if (completed % 20 === 0) {
+        modelCounts = await getModelGameCounts();
+      }
+    }
+
+    const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
+    const finalCounts = await getModelGameCounts();
+    
+    logger.info("🏁 Fast tournament complete", {
+      totalGames: gamesToRun,
+      successful,
+      failed,
+      successRate: `${((successful / gamesToRun) * 100).toFixed(1)}%`,
+      scenarioCounts,
+      totalDuration: `${totalDuration}s`,
+      gamesPerMinute: ((gamesToRun / parseFloat(totalDuration)) * 60).toFixed(1),
+      finalModelCounts: Object.fromEntries(finalCounts),
+    });
+
+    return { successful, failed, scenarioCounts, modelCounts: Object.fromEntries(finalCounts) };
   },
 });

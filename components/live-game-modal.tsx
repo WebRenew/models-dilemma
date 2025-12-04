@@ -53,6 +53,31 @@ interface GameRoundRow {
   game_winner: string | null
 }
 
+interface LiveStatusRow {
+  game_id: string
+  current_round: number | null
+  agent1_status: string | null
+  agent2_status: string | null
+  agent1_retry_count: number | null
+  agent2_retry_count: number | null
+  last_error: string | null
+  updated_at: string | null
+}
+
+function formatAgentStatus(status: string | null, retryCount: number | null): string {
+  if (!status) return "Waiting..."
+  switch (status) {
+    case "waiting": return "Waiting..."
+    case "processing": return "Processing..."
+    case "retrying_1": return `Retrying (1/3)...`
+    case "retrying_2": return `Retrying (2/3)...`
+    case "retrying_3": return `Retrying (3/3)...`
+    case "done": return "Done"
+    case "error": return `Failed after ${retryCount ?? 3} attempts`
+    default: return status.startsWith("retrying_") ? `Retrying...` : status
+  }
+}
+
 const SCENARIOS: Record<string, { name: string; badge: string }> = {
   overt: { name: "Overt (Control)", badge: "[O]" },
   sales: { name: "Sales Territory", badge: "[C:S]" },
@@ -77,6 +102,11 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
   const [winner, setWinner] = useState<string | null>(null)
   const [agent1Thought, setAgent1Thought] = useState<StreamingThought>({ text: "", isComplete: false })
   const [agent2Thought, setAgent2Thought] = useState<StreamingThought>({ text: "", isComplete: false })
+  const [agent1Status, setAgent1Status] = useState<string | null>(null)
+  const [agent2Status, setAgent2Status] = useState<string | null>(null)
+  const [agent1RetryCount, setAgent1RetryCount] = useState<number | null>(null)
+  const [agent2RetryCount, setAgent2RetryCount] = useState<number | null>(null)
+  const [lastError, setLastError] = useState<string | null>(null)
   
   const supabaseRef = useRef(createClient())
   const channelRef = useRef<ReturnType<typeof supabaseRef.current.channel> | null>(null)
@@ -174,7 +204,7 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
     }
   }, []) // Only on mount
 
-  // Subscribe to real-time updates
+  // Subscribe to real-time updates for game_rounds
   useEffect(() => {
     if (!isOpen || !gameId) return
 
@@ -245,6 +275,71 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
     }
   }, [isOpen, gameId, typewriter])
 
+  // Subscribe to live status updates (retry status)
+  useEffect(() => {
+    if (!isOpen || !gameId) return
+
+    console.log("[LiveGame] Setting up live status subscription for game:", gameId)
+
+    // Fetch initial status
+    const fetchInitialStatus = async () => {
+      const { data } = await supabaseRef.current
+        .from("game_live_status")
+        .select("*")
+        .eq("game_id", gameId)
+        .single()
+      
+      if (data) {
+        const status = data as LiveStatusRow
+        setAgent1Status(status.agent1_status)
+        setAgent2Status(status.agent2_status)
+        setAgent1RetryCount(status.agent1_retry_count)
+        setAgent2RetryCount(status.agent2_retry_count)
+        setLastError(status.last_error)
+      }
+    }
+    fetchInitialStatus()
+
+    const statusChannel = supabaseRef.current
+      .channel(`live-status-${gameId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*", // INSERT, UPDATE, DELETE
+          schema: "public",
+          table: "game_live_status",
+          filter: `game_id=eq.${gameId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            // Game completed, clear status
+            setAgent1Status(null)
+            setAgent2Status(null)
+            setAgent1RetryCount(null)
+            setAgent2RetryCount(null)
+            setLastError(null)
+            return
+          }
+
+          const status = payload.new as LiveStatusRow
+          console.log("[LiveGame] Status update:", status.agent1_status, status.agent2_status)
+          
+          setAgent1Status(status.agent1_status)
+          setAgent2Status(status.agent2_status)
+          setAgent1RetryCount(status.agent1_retry_count)
+          setAgent2RetryCount(status.agent2_retry_count)
+          setLastError(status.last_error)
+        }
+      )
+      .subscribe((status) => {
+        console.log("[LiveGame] Status subscription:", status)
+      })
+
+    return () => {
+      supabaseRef.current.removeChannel(statusChannel)
+    }
+  }, [isOpen, gameId])
+
   // Reset state when modal opens with new game
   useEffect(() => {
     if (isOpen && initialData) {
@@ -256,6 +351,11 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
       setWinner(null)
       setAgent1Thought({ text: "", isComplete: false })
       setAgent2Thought({ text: "", isComplete: false })
+      setAgent1Status(null)
+      setAgent2Status(null)
+      setAgent1RetryCount(null)
+      setAgent2RetryCount(null)
+      setLastError(null)
 
       // Show latest round's reasoning
       if (initialData.rounds.length > 0) {
@@ -390,10 +490,25 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
                     )}
                   </div>
                   
+                  {/* Status indicator for retries */}
+                  {agent1Status && agent1Status !== "done" && agent1Status !== "waiting" && !isComplete && (
+                    <div className={`px-3 sm:px-4 py-1.5 border-b border-white/10 ${
+                      agent1Status.startsWith("retrying") ? "bg-amber-500/10" : 
+                      agent1Status === "error" ? "bg-red-500/10" : "bg-blue-500/10"
+                    }`}>
+                      <span className={`font-mono text-[10px] ${
+                        agent1Status.startsWith("retrying") ? "text-amber-400" :
+                        agent1Status === "error" ? "text-red-400" : "text-blue-400"
+                      }`}>
+                        {formatAgentStatus(agent1Status, agent1RetryCount)}
+                      </span>
+                    </div>
+                  )}
+                  
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                        {agent1Thought.text || (rounds.length === 0 ? "Waiting for first move..." : "Processing...")}
+                        {agent1Thought.text || (rounds.length === 0 ? "Waiting for first move..." : formatAgentStatus(agent1Status, agent1RetryCount))}
                         {!agent1Thought.isComplete && !isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}
@@ -431,10 +546,25 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
                     )}
                   </div>
                   
+                  {/* Status indicator for retries */}
+                  {agent2Status && agent2Status !== "done" && agent2Status !== "waiting" && !isComplete && (
+                    <div className={`px-3 sm:px-4 py-1.5 border-b border-white/10 ${
+                      agent2Status.startsWith("retrying") ? "bg-amber-500/10" : 
+                      agent2Status === "error" ? "bg-red-500/10" : "bg-purple-500/10"
+                    }`}>
+                      <span className={`font-mono text-[10px] ${
+                        agent2Status.startsWith("retrying") ? "text-amber-400" :
+                        agent2Status === "error" ? "text-red-400" : "text-purple-400"
+                      }`}>
+                        {formatAgentStatus(agent2Status, agent2RetryCount)}
+                      </span>
+                    </div>
+                  )}
+                  
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                        {agent2Thought.text || (rounds.length === 0 ? "Waiting for first move..." : "Processing...")}
+                        {agent2Thought.text || (rounds.length === 0 ? "Waiting for first move..." : formatAgentStatus(agent2Status, agent2RetryCount))}
                         {!agent2Thought.isComplete && !isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}

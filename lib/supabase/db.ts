@@ -237,12 +237,12 @@ export async function fetchModelRankings(limit = 10, activeModelIds?: string[]) 
 
   return rankings
     .sort((a, b) => {
-      // Primary: sort by wins (descending)
+      // Primary: sort by total points (the true measure in Prisoner's Dilemma)
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints
+      // Tiebreaker: more wins
       if (b.wins !== a.wins) return b.wins - a.wins
-      // Tiebreaker: fewer losses is better
-      if (a.losses !== b.losses) return a.losses - b.losses
-      // Final tiebreaker: total points
-      return b.totalPoints - a.totalPoints
+      // Final tiebreaker: fewer losses
+      return a.losses - b.losses
     })
     .slice(0, limit)
 }
@@ -683,4 +683,162 @@ export async function fetchScenarioStats() {
   }
 
   return stats
+}
+
+export interface ModelDetailedStats {
+  modelId: string
+  displayName: string
+  totalGames: number
+  totalPoints: number
+  totalErrors: number
+  wins: number
+  losses: number
+  ties: number
+  behavior: {
+    forgiving: number
+    forgivingTotal: number
+    retaliating: number
+    retaliatingTotal: number
+    nice: number
+    niceTotal: number
+    nonEnvious: number
+    nonEnviousTotal: number
+  }
+}
+
+export async function fetchModelDetailedStats(modelId: string): Promise<ModelDetailedStats | null> {
+  const supabase = createClient()
+
+  // Fetch all rounds where this model participated
+  const { data: allRounds, error } = await supabase
+    .from("game_rounds")
+    .select("*")
+    .or(`agent1_model_id.eq.${modelId},agent2_model_id.eq.${modelId}`)
+    .order("game_id")
+    .order("round_number", { ascending: true })
+
+  if (error || !allRounds || allRounds.length === 0) {
+    return null
+  }
+
+  // Group rounds by game_id
+  const gameRounds = new Map<string, typeof allRounds>()
+  for (const round of allRounds) {
+    const existing = gameRounds.get(round.game_id) || []
+    existing.push(round)
+    gameRounds.set(round.game_id, existing)
+  }
+
+  let displayName = modelId
+  let totalPoints = 0
+  let totalErrors = 0
+  let wins = 0
+  let losses = 0
+  let ties = 0
+  let forgiving = 0
+  let forgivingTotal = 0
+  let retaliating = 0
+  let retaliatingTotal = 0
+  let nice = 0
+  let niceTotal = 0
+  let nonEnvious = 0
+  let nonEnviousTotal = 0
+
+  const processedGames = new Set<string>()
+
+  for (const [gameId, rounds] of gameRounds) {
+    if (rounds.length === 0) continue
+    
+    const firstRound = rounds[0]
+    const isAgent1 = firstRound.agent1_model_id === modelId
+    
+    // Get display name
+    if (isAgent1 && firstRound.agent1_display_name) {
+      displayName = firstRound.agent1_display_name
+    } else if (!isAgent1 && firstRound.agent2_display_name) {
+      displayName = firstRound.agent2_display_name
+    }
+
+    // Find the final round for this game
+    const finalRound = rounds.find(r => r.is_final_round)
+    
+    if (finalRound && !processedGames.has(gameId)) {
+      processedGames.add(gameId)
+      
+      // Calculate points and wins/losses
+      if (isAgent1) {
+        totalPoints += finalRound.agent1_cumulative_score
+        if (finalRound.game_winner === "agent1") wins++
+        else if (finalRound.game_winner === "agent2") losses++
+        else ties++
+      } else {
+        totalPoints += finalRound.agent2_cumulative_score
+        if (finalRound.game_winner === "agent2") wins++
+        else if (finalRound.game_winner === "agent1") losses++
+        else ties++
+      }
+    }
+
+    // Count errors
+    for (const round of rounds) {
+      if (isAgent1 && round.agent1_decision === "error") totalErrors++
+      if (!isAgent1 && round.agent2_decision === "error") totalErrors++
+    }
+
+    // Nice: first move is cooperate
+    niceTotal++
+    const firstDecision = isAgent1 ? rounds[0].agent1_decision : rounds[0].agent2_decision
+    if (firstDecision === "cooperate") nice++
+
+    // Forgiving and retaliating patterns
+    for (let i = 1; i < rounds.length; i++) {
+      const prevRound = rounds[i - 1]
+      const currRound = rounds[i]
+      
+      const opponentPrevDecision = isAgent1 ? prevRound.agent2_decision : prevRound.agent1_decision
+      const myCurrentDecision = isAgent1 ? currRound.agent1_decision : currRound.agent2_decision
+
+      // If opponent defected last round
+      if (opponentPrevDecision === "defect") {
+        forgivingTotal++
+        retaliatingTotal++
+        if (myCurrentDecision === "cooperate") {
+          forgiving++
+        } else if (myCurrentDecision === "defect") {
+          retaliating++
+        }
+      }
+    }
+
+    // Non-envious: model doesn't defect more than opponent
+    nonEnviousTotal++
+    const myDefects = rounds.filter(r => 
+      isAgent1 ? r.agent1_decision === "defect" : r.agent2_decision === "defect"
+    ).length
+    const opponentDefects = rounds.filter(r => 
+      isAgent1 ? r.agent2_decision === "defect" : r.agent1_decision === "defect"
+    ).length
+    if (myDefects <= opponentDefects) nonEnvious++
+  }
+
+  return {
+    modelId,
+    displayName,
+    totalGames: processedGames.size,
+    totalPoints,
+    totalErrors,
+    wins,
+    losses,
+    ties,
+    behavior: {
+      forgiving,
+      forgivingTotal,
+      retaliating,
+      retaliatingTotal,
+      nice,
+      niceTotal,
+      nonEnvious,
+      nonEnviousTotal,
+    },
+  }
 }

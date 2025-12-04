@@ -36,6 +36,26 @@ interface LiveMatch {
     payoffA: number
     payoffB: number
   }>
+  // Live status for retry tracking
+  agent1Status?: string | null
+  agent2Status?: string | null
+  agent1RetryCount?: number | null
+  agent2RetryCount?: number | null
+  lastError?: string | null
+}
+
+function formatAgentStatusShort(status: string | null): string | null {
+  if (!status) return null
+  switch (status) {
+    case "waiting": return null
+    case "processing": return null
+    case "retrying_1": return "⚠️ Retry 1/3"
+    case "retrying_2": return "⚠️ Retry 2/3"
+    case "retrying_3": return "⚠️ Retry 3/3"
+    case "done": return null
+    case "error": return "❌ Failed"
+    default: return status.startsWith("retrying_") ? "⚠️ Retrying" : null
+  }
 }
 
 function formatModelName(slug: string): string {
@@ -129,6 +149,10 @@ function LiveMatchRow({ match, onClick }: { match: LiveMatch; onClick: () => voi
   const pendingRounds = match.totalRounds - match.rounds.length
   const isStarting = match.rounds.length === 0
   const currentRound = match.currentRound || match.rounds.length
+  
+  const agent1RetryStatus = formatAgentStatusShort(match.agent1Status ?? null)
+  const agent2RetryStatus = formatAgentStatusShort(match.agent2Status ?? null)
+  const hasRetryStatus = agent1RetryStatus || agent2RetryStatus
 
   return (
     <motion.div
@@ -143,9 +167,9 @@ function LiveMatchRow({ match, onClick }: { match: LiveMatch; onClick: () => voi
         <motion.div
           animate={{ scale: [1, 1.3, 1], opacity: [1, 0.7, 1] }}
           transition={{ duration: 1.2, repeat: Infinity }}
-          className="w-2 h-2 rounded-full bg-emerald-500"
+          className={`w-2 h-2 rounded-full ${hasRetryStatus ? "bg-amber-500" : "bg-emerald-500"}`}
         />
-        <span className="text-emerald-400 font-mono text-[10px] uppercase tracking-wider">
+        <span className={`font-mono text-[10px] uppercase tracking-wider ${hasRetryStatus ? "text-amber-400" : "text-emerald-400"}`}>
           {isStarting ? (
             <motion.span
               initial={{ opacity: 0 }}
@@ -154,6 +178,8 @@ function LiveMatchRow({ match, onClick }: { match: LiveMatch; onClick: () => voi
             >
               Starting match...
             </motion.span>
+          ) : hasRetryStatus ? (
+            `Live • Round ${currentRound}/${match.totalRounds} • ${agent1RetryStatus || agent2RetryStatus}`
           ) : (
             `Live • Round ${currentRound}/${match.totalRounds}`
           )}
@@ -366,6 +392,31 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
       return
     }
 
+    // Also fetch live status for all recent games
+    const { data: liveStatuses } = await supabase
+      .from("game_live_status")
+      .select("*")
+    
+    const statusMap = new Map<string, {
+      agent1_status: string | null
+      agent2_status: string | null
+      agent1_retry_count: number | null
+      agent2_retry_count: number | null
+      last_error: string | null
+    }>()
+    
+    if (liveStatuses) {
+      for (const status of liveStatuses) {
+        statusMap.set(status.game_id, {
+          agent1_status: status.agent1_status,
+          agent2_status: status.agent2_status,
+          agent1_retry_count: status.agent1_retry_count,
+          agent2_retry_count: status.agent2_retry_count,
+          last_error: status.last_error,
+        })
+      }
+    }
+
     // Group by game_id
     const gameMap = new Map<string, typeof recentRounds>()
     for (const round of recentRounds) {
@@ -389,6 +440,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
       if (!hasFinalRound && sortedRounds.length > 0) {
         const firstRound = sortedRounds[0]
         const lastRound = sortedRounds[sortedRounds.length - 1]
+        const liveStatus = statusMap.get(gameId)
         
         liveGames.push({
           id: gameId,
@@ -411,6 +463,12 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
             payoffA: r.agent1_round_points,
             payoffB: r.agent2_round_points,
           })),
+          // Include live status for retry display
+          agent1Status: liveStatus?.agent1_status,
+          agent2Status: liveStatus?.agent2_status,
+          agent1RetryCount: liveStatus?.agent1_retry_count,
+          agent2RetryCount: liveStatus?.agent2_retry_count,
+          lastError: liveStatus?.last_error,
         })
       }
     }
@@ -512,7 +570,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
     return () => clearInterval(liveInterval)
   }, [fetchLiveMatches])
 
-  // Subscribe to realtime updates for game_rounds (single table for everything)
+  // Subscribe to realtime updates for game_rounds and game_live_status
   useEffect(() => {
     const supabase = createClient()
     
@@ -548,11 +606,32 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
         }
       )
       .subscribe((status) => {
-        console.log('[Realtime] Subscription status:', status)
+        console.log('[Realtime] game_rounds subscription:', status)
+      })
+
+    // Subscribe to live status changes (for retry status updates)
+    const liveStatusChannel = supabase
+      .channel('live-status-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'game_live_status',
+        },
+        (payload) => {
+          console.log('[Realtime] Live status update:', payload.eventType, payload.new)
+          // Refresh live matches to pick up retry status changes
+          fetchLiveMatches()
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Realtime] game_live_status subscription:', status)
       })
 
     return () => {
       supabase.removeChannel(gameRoundsChannel)
+      supabase.removeChannel(liveStatusChannel)
     }
   }, [onNewGame, fetchLiveMatches])
 

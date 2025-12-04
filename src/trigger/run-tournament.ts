@@ -17,10 +17,12 @@ const RETRY_CONFIG = {
 /**
  * Retry wrapper with exponential backoff and jitter
  * Retries on timeout, network errors, and 5xx errors
+ * Optional onRetry callback for live status updates
  */
 async function withRetry<T>(
   fn: (signal: AbortSignal) => Promise<T>,
-  context: { model: string; round: number }
+  context: { model: string; round: number },
+  onRetry?: (attempt: number, error: string) => Promise<void>
 ): Promise<T> {
   let lastError: Error | null = null;
 
@@ -50,6 +52,11 @@ async function withRetry<T>(
 
       if (!isRetryable || attempt >= RETRY_CONFIG.maxAttempts) {
         throw lastError;
+      }
+
+      // Notify about retry via callback (for live status updates)
+      if (onRetry) {
+        await onRetry(attempt + 1, lastError.message);
       }
 
       // Exponential backoff with jitter
@@ -131,6 +138,71 @@ function getSupabaseClient() {
   }
   
   return createClient(url, key);
+}
+
+// =============================================================================
+// Live Status Tracking - Updates game_live_status for real-time UI feedback
+// =============================================================================
+
+type AgentStatus = "waiting" | "processing" | "retrying_1" | "retrying_2" | "retrying_3" | "done" | "error";
+
+interface LiveStatusUpdate {
+  gameId: string;
+  currentRound?: number;
+  agent1Status?: AgentStatus;
+  agent2Status?: AgentStatus;
+  agent1RetryCount?: number;
+  agent2RetryCount?: number;
+  lastError?: string | null;
+}
+
+async function initLiveStatus(gameId: string, totalRounds: number): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("game_live_status").upsert({
+    game_id: gameId,
+    current_round: 1,
+    agent1_status: "waiting",
+    agent2_status: "waiting",
+    agent1_retry_count: 0,
+    agent2_retry_count: 0,
+    last_error: null,
+    updated_at: new Date().toISOString(),
+  });
+  
+  if (error) {
+    logger.warn("Failed to init live status", { gameId: gameId.slice(0, 8), error: error.message });
+  }
+}
+
+async function updateLiveStatus(update: LiveStatusUpdate): Promise<void> {
+  const supabase = getSupabaseClient();
+  
+  const payload: Record<string, unknown> = {
+    game_id: update.gameId,
+    updated_at: new Date().toISOString(),
+  };
+  
+  if (update.currentRound !== undefined) payload.current_round = update.currentRound;
+  if (update.agent1Status !== undefined) payload.agent1_status = update.agent1Status;
+  if (update.agent2Status !== undefined) payload.agent2_status = update.agent2Status;
+  if (update.agent1RetryCount !== undefined) payload.agent1_retry_count = update.agent1RetryCount;
+  if (update.agent2RetryCount !== undefined) payload.agent2_retry_count = update.agent2RetryCount;
+  if (update.lastError !== undefined) payload.last_error = update.lastError;
+  
+  const { error } = await supabase.from("game_live_status").upsert(payload);
+  
+  if (error) {
+    logger.warn("Failed to update live status", { gameId: update.gameId.slice(0, 8), error: error.message });
+  }
+}
+
+async function clearLiveStatus(gameId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("game_live_status").delete().eq("game_id", gameId);
+  
+  if (error) {
+    logger.warn("Failed to clear live status", { gameId: gameId.slice(0, 8), error: error.message });
+  }
 }
 
 // =============================================================================
@@ -347,6 +419,9 @@ async function runGame(
   logger.info("Database connection verified");
   
   const gameId = crypto.randomUUID();
+  
+  // Initialize live status for real-time UI updates
+  await initLiveStatus(gameId, totalRounds);
   const gameTimestamp = new Date().toISOString();
   const framing = scenario === "overt" ? "overt" : "cloaked";
   const gameType = framing === "cloaked" ? "hidden_agenda" : "control";
@@ -397,6 +472,16 @@ async function runGame(
       let rawResponseB: string | null = null;
 
       // Call models in parallel with retry
+      // Update live status: both models processing
+      await updateLiveStatus({
+        gameId,
+        currentRound: round,
+        agent1Status: "processing",
+        agent2Status: "processing",
+        agent1RetryCount: 0,
+        agent2RetryCount: 0,
+      });
+
       const callModelA = async () => {
         try {
           const result = await withRetry(
@@ -407,11 +492,29 @@ async function runGame(
                 temperature: 0,
                 abortSignal: signal,
               }),
-            { model: modelA, round }
+            { model: modelA, round },
+            // onRetry callback for live status
+            async (attempt, error) => {
+              const status = `retrying_${attempt}` as AgentStatus;
+              await updateLiveStatus({
+                gameId,
+                agent1Status: status,
+                agent1RetryCount: attempt - 1,
+                lastError: `${modelA}: ${error}`,
+              });
+            }
           );
+          // Update status to done
+          await updateLiveStatus({ gameId, agent1Status: "done" });
           return { success: true as const, result };
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
+          await updateLiveStatus({ 
+            gameId, 
+            agent1Status: "error", 
+            agent1RetryCount: RETRY_CONFIG.maxAttempts,
+            lastError: `${modelA}: ${errMsg}`,
+          });
           return { success: false as const, error: errMsg };
         }
       };
@@ -426,11 +529,29 @@ async function runGame(
                 temperature: 0,
                 abortSignal: signal,
               }),
-            { model: modelB, round }
+            { model: modelB, round },
+            // onRetry callback for live status
+            async (attempt, error) => {
+              const status = `retrying_${attempt}` as AgentStatus;
+              await updateLiveStatus({
+                gameId,
+                agent2Status: status,
+                agent2RetryCount: attempt - 1,
+                lastError: `${modelB}: ${error}`,
+              });
+            }
           );
+          // Update status to done
+          await updateLiveStatus({ gameId, agent2Status: "done" });
           return { success: true as const, result };
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
+          await updateLiveStatus({ 
+            gameId, 
+            agent2Status: "error",
+            agent2RetryCount: RETRY_CONFIG.maxAttempts,
+            lastError: `${modelB}: ${errMsg}`,
+          });
           return { success: false as const, error: errMsg };
         }
       };
@@ -585,9 +706,13 @@ async function runGame(
       }
     }
 
+    // Clear live status - game complete
+    await clearLiveStatus(gameId);
     return { success: true, gameId, scoreA, scoreB };
   } catch (error) {
     logger.error("Game failed", { error: String(error) });
+    // Clear live status on error too
+    await clearLiveStatus(gameId);
     return { success: false, error: String(error) };
   }
 }

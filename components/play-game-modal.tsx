@@ -178,9 +178,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
             }, 30)
           }
 
-          setAgent1Thought({ text: "", isComplete: false })
-          setAgent2Thought({ text: "", isComplete: false })
-          
+          // Don't clear previous thoughts - keep them visible while processing
+          // The typewriter will naturally overwrite when new reasoning arrives
           if (row.agent1_reasoning) {
             typewriter(row.agent1_reasoning, setAgent1Thought)
           }
@@ -539,7 +538,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                        {agent1Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
+                        {agent1Thought.text || rounds[rounds.length - 1]?.agent1Reasoning || (currentRound === 0 ? "Waiting for first move..." : "")}
                         {isProcessing && !agent1Thought.isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}
@@ -576,7 +575,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                        {agent2Thought.text || (isProcessing ? "Analyzing situation..." : "Waiting for round to start...")}
+                        {agent2Thought.text || rounds[rounds.length - 1]?.agent2Reasoning || (currentRound === 0 ? "Waiting for first move..." : "")}
                         {isProcessing && !agent2Thought.isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}

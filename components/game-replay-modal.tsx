@@ -127,11 +127,10 @@ export function GameReplayModal({ isOpen, onClose, game }: GameReplayModalProps)
   )
 
   // Update thoughts when round changes
+  // Don't clear previous text - the typewriter will overwrite it naturally
+  // This keeps previous reasoning visible during transitions
   useEffect(() => {
     if (!currentRound) return
-    
-    setAgent1Thought({ text: "", isComplete: false })
-    setAgent2Thought({ text: "", isComplete: false })
 
     animateThought(currentRound.agent1Reasoning, setAgent1Thought, typewriterRef1)
     animateThought(currentRound.agent2Reasoning, setAgent2Thought, typewriterRef2)
@@ -327,7 +326,7 @@ export function GameReplayModal({ isOpen, onClose, game }: GameReplayModalProps)
                 <div className="flex-1 overflow-y-auto min-h-0">
                   <div className="p-3 sm:p-4">
                     <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                      {agent1Thought.text || "Loading reasoning..."}
+                      {agent1Thought.text || currentRound?.agent1Reasoning || "No reasoning provided."}
                       {!agent1Thought.isComplete && (
                         <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                       )}
@@ -368,7 +367,7 @@ export function GameReplayModal({ isOpen, onClose, game }: GameReplayModalProps)
                 <div className="flex-1 overflow-y-auto min-h-0">
                   <div className="p-3 sm:p-4">
                     <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                      {agent2Thought.text || "Loading reasoning..."}
+                      {agent2Thought.text || currentRound?.agent2Reasoning || "No reasoning provided."}
                       {!agent2Thought.isComplete && (
                         <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                       )}

@@ -35,6 +35,8 @@ interface LiveMatch {
     actionB: string
     payoffA: number
     payoffB: number
+    reasoningA?: string | null
+    reasoningB?: string | null
   }>
   // Live status for retry tracking
   agent1Status?: string | null
@@ -49,9 +51,8 @@ function formatAgentStatusShort(status: string | null): string | null {
   switch (status) {
     case "waiting": return null
     case "processing": return null
-    case "retrying_1": return "⚠️ Retry 1/3"
-    case "retrying_2": return "⚠️ Retry 2/3"
-    case "retrying_3": return "⚠️ Retry 3/3"
+    case "retrying_1": return "⚠️ Retrying"
+    case "retrying_2": return "⚠️ Final retry"
     case "done": return null
     case "error": return "❌ Failed"
     default: return status.startsWith("retrying_") ? "⚠️ Retrying" : null
@@ -269,6 +270,15 @@ function LiveMatchRow({ match, onClick }: { match: LiveMatch; onClick: () => voi
   )
 }
 
+// Debounce helper to prevent rapid successive calls
+function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
+  let timeoutId: NodeJS.Timeout | null = null
+  return ((...args: unknown[]) => {
+    if (timeoutId) clearTimeout(timeoutId)
+    timeoutId = setTimeout(() => fn(...args), delay)
+  }) as T
+}
+
 function GameRow({ game, isNew, onClick }: { game: GameRecord; isNew: boolean; onClick: () => void }) {
   const gameWinner = game.winner
 
@@ -352,6 +362,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
   const lastFetchTimeRef = useRef<number>(Date.now())
   const seenGameIdsRef = useRef<Set<string>>(new Set())
   const oldestTimestampRef = useRef<number | null>(null)
+  const supabaseRef = useRef(createClient())
 
   const handleGameClick = useCallback((game: GameRecord) => {
     setSelectedGame(game)
@@ -370,32 +381,45 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
 
   // Fetch live matches from game_rounds (games in progress = not yet has is_final_round=true)
   const fetchLiveMatches = useCallback(async () => {
-    const supabase = createClient()
-
-    // Get recent game_ids that started in the last 10 minutes
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    // Get rounds created in the last 30 minutes (games can run slow with retries)
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
     
-    const { data: recentRounds, error } = await supabase
+    // Select only the columns we need instead of *
+    const { data: recentRounds, error } = await supabaseRef.current
       .from("game_rounds")
-      .select("*")
-      .gte("game_timestamp", tenMinutesAgo)
-      .order("game_timestamp", { ascending: false })
-
-    console.log('[fetchLiveMatches] Query result:', { 
-      roundCount: recentRounds?.length || 0, 
-      error: error?.message,
-      tenMinutesAgo 
-    })
+      .select(`
+        game_id,
+        round_number,
+        total_rounds,
+        agent1_model_id,
+        agent1_display_name,
+        agent1_decision,
+        agent1_reasoning,
+        agent1_round_points,
+        agent1_cumulative_score,
+        agent2_model_id,
+        agent2_display_name,
+        agent2_decision,
+        agent2_reasoning,
+        agent2_round_points,
+        agent2_cumulative_score,
+        is_final_round,
+        scenario,
+        game_type,
+        game_source
+      `)
+      .gte("created_at", thirtyMinutesAgo)
+      .order("created_at", { ascending: false })
 
     if (error || !recentRounds) {
       console.error('[fetchLiveMatches] Error:', error)
       return
     }
 
-    // Also fetch live status for all recent games
-    const { data: liveStatuses } = await supabase
+    // Also fetch live status for all recent games - only needed columns
+    const { data: liveStatuses } = await supabaseRef.current
       .from("game_live_status")
-      .select("*")
+      .select("game_id, agent1_status, agent2_status, agent1_retry_count, agent2_retry_count, last_error")
     
     const statusMap = new Map<string, {
       agent1_status: string | null
@@ -425,16 +449,12 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
       gameMap.set(round.game_id, existing)
     }
 
-    console.log('[fetchLiveMatches] Games found:', gameMap.size)
-
     // Find games that are in progress (have rounds but no final round yet)
     const liveGames: LiveMatch[] = []
     
     for (const [gameId, rounds] of gameMap) {
       const sortedRounds = rounds.sort((a, b) => a.round_number - b.round_number)
       const hasFinalRound = sortedRounds.some(r => r.is_final_round)
-      
-      console.log(`[fetchLiveMatches] Game ${gameId.slice(0,8)}: ${rounds.length} rounds, final: ${hasFinalRound}`)
       
       // If no final round yet, it's live
       if (!hasFinalRound && sortedRounds.length > 0) {
@@ -462,6 +482,8 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
             actionB: r.agent2_decision,
             payoffA: r.agent1_round_points,
             payoffB: r.agent2_round_points,
+            reasoningA: r.agent1_reasoning,
+            reasoningB: r.agent2_reasoning,
           })),
           // Include live status for retry display
           agent1Status: liveStatus?.agent1_status,
@@ -473,7 +495,6 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
       }
     }
 
-    console.log('[fetchLiveMatches] Live games:', liveGames.length)
     setLiveMatches(liveGames)
   }, [])
 
@@ -529,18 +550,15 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
     loadInitialGames()
   }, [])
 
-  // Poll for new completed games every 3 seconds
+  // Poll for new completed games every 10 seconds as backup (realtime handles most updates)
   useEffect(() => {
     const pollInterval = setInterval(async () => {
-      const queryTime = lastFetchTimeRef.current - 10000 // 10s buffer for slow games
+      const queryTime = lastFetchTimeRef.current - 15000 // 15s buffer for slow games
       const newGames = await fetchNewGames(queryTime)
-
-      console.log('[pollNewGames] Found', newGames.length, 'games since', new Date(queryTime).toISOString())
 
       const trulyNewGames = newGames.filter((g) => !seenGameIdsRef.current.has(g.id))
 
       if (trulyNewGames.length > 0) {
-        console.log('[pollNewGames] Adding', trulyNewGames.length, 'new games to feed')
         trulyNewGames.forEach((g) => seenGameIdsRef.current.add(g.id))
         setDbGames((prev) => [...trulyNewGames, ...prev])
 
@@ -554,7 +572,7 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
       }
 
       lastFetchTimeRef.current = Date.now()
-    }, 3000)
+    }, 10000)
 
     return () => clearInterval(pollInterval)
   }, [onNewGame])
@@ -564,18 +582,17 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
     onLiveMatchCountChange?.(liveMatches.length)
   }, [liveMatches.length, onLiveMatchCountChange])
 
-  // Poll for live match updates every 1 second as fallback
-  useEffect(() => {
-    const liveInterval = setInterval(fetchLiveMatches, 1000)
-    return () => clearInterval(liveInterval)
-  }, [fetchLiveMatches])
+  // Debounced version of fetchLiveMatches to prevent rapid-fire calls from realtime
+  const debouncedFetchLiveMatches = useCallback(
+    debounce(() => fetchLiveMatches(), 300),
+    [fetchLiveMatches]
+  )
 
   // Subscribe to realtime updates for game_rounds and game_live_status
+  // No polling needed - realtime handles updates
   useEffect(() => {
-    const supabase = createClient()
-    
     // Subscribe to all game_rounds changes
-    const gameRoundsChannel = supabase
+    const gameRoundsChannel = supabaseRef.current
       .channel('game-rounds-realtime')
       .on(
         'postgres_changes',
@@ -586,10 +603,9 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
         },
         async (payload) => {
           const newRound = payload.new as { is_final_round: boolean; game_id: string }
-          console.log('[Realtime] New round:', newRound.game_id, 'final:', newRound.is_final_round)
           
-          // Refresh live matches on any new round
-          fetchLiveMatches()
+          // Refresh live matches on any new round (debounced)
+          debouncedFetchLiveMatches()
           
           // If it's a final round, also refresh completed games
           if (newRound.is_final_round) {
@@ -605,12 +621,10 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
           }
         }
       )
-      .subscribe((status) => {
-        console.log('[Realtime] game_rounds subscription:', status)
-      })
+      .subscribe()
 
     // Subscribe to live status changes (for retry status updates)
-    const liveStatusChannel = supabase
+    const liveStatusChannel = supabaseRef.current
       .channel('live-status-realtime')
       .on(
         'postgres_changes',
@@ -619,21 +633,18 @@ export function GameFeed({ userGames = [], onNewGame, onLiveMatchCountChange }: 
           schema: 'public',
           table: 'game_live_status',
         },
-        (payload) => {
-          console.log('[Realtime] Live status update:', payload.eventType, payload.new)
-          // Refresh live matches to pick up retry status changes
-          fetchLiveMatches()
+        () => {
+          // Refresh live matches to pick up retry status changes (debounced)
+          debouncedFetchLiveMatches()
         }
       )
-      .subscribe((status) => {
-        console.log('[Realtime] game_live_status subscription:', status)
-      })
+      .subscribe()
 
     return () => {
-      supabase.removeChannel(gameRoundsChannel)
-      supabase.removeChannel(liveStatusChannel)
+      supabaseRef.current.removeChannel(gameRoundsChannel)
+      supabaseRef.current.removeChannel(liveStatusChannel)
     }
-  }, [onNewGame, fetchLiveMatches])
+  }, [onNewGame, debouncedFetchLiveMatches])
 
   return (
     <>

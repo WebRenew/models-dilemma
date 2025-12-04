@@ -8,9 +8,9 @@ import { generateText } from "ai";
 // =============================================================================
 
 const RETRY_CONFIG = {
-  maxAttempts: 3,
+  maxAttempts: 2, // 1 retry (2 total attempts) - keeps games moving, model reliability is part of the test
   baseDelayMs: 2_000,
-  maxDelayMs: 30_000,
+  maxDelayMs: 10_000,
   timeoutMs: 90_000, // 90 seconds per attempt
 } as const;
 
@@ -144,7 +144,7 @@ function getSupabaseClient() {
 // Live Status Tracking - Updates game_live_status for real-time UI feedback
 // =============================================================================
 
-type AgentStatus = "waiting" | "processing" | "retrying_1" | "retrying_2" | "retrying_3" | "done" | "error";
+type AgentStatus = "waiting" | "processing" | "retrying_1" | "retrying_2" | "done" | "error";
 
 interface LiveStatusUpdate {
   gameId: string;
@@ -574,7 +574,7 @@ async function runGame(
 
         responseA = {
           decision: parsedA.decision,
-          reasoning: resA.result.text.slice(0, 500),
+          reasoning: resA.result.text.slice(0, 4000),
         };
       } else {
         logger.error(`Model A (${modelA}) failed after retries`, {
@@ -604,7 +604,7 @@ async function runGame(
 
         responseB = {
           decision: parsedB.decision,
-          reasoning: resB.result.text.slice(0, 500),
+          reasoning: resB.result.text.slice(0, 4000),
         };
       } else {
         logger.error(`Model B (${modelB}) failed after retries`, {

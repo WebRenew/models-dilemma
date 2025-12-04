@@ -69,11 +69,10 @@ function formatAgentStatus(status: string | null, retryCount: number | null): st
   switch (status) {
     case "waiting": return "Waiting..."
     case "processing": return "Processing..."
-    case "retrying_1": return `Retrying (1/3)...`
-    case "retrying_2": return `Retrying (2/3)...`
-    case "retrying_3": return `Retrying (3/3)...`
+    case "retrying_1": return `Retrying...`
+    case "retrying_2": return `Retrying (final)...`
     case "done": return "Done"
-    case "error": return `Failed after ${retryCount ?? 3} attempts`
+    case "error": return `Failed after ${retryCount ?? 2} attempts`
     default: return status.startsWith("retrying_") ? `Retrying...` : status
   }
 }
@@ -112,6 +111,8 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
   const channelRef = useRef<ReturnType<typeof supabaseRef.current.channel> | null>(null)
   const typewriterRef1 = useRef<NodeJS.Timeout | null>(null)
   const typewriterRef2 = useRef<NodeJS.Timeout | null>(null)
+  const prevGameIdRef = useRef<string | null>(null)
+  const wasOpenRef = useRef(false)
 
   const totalRounds = initialData?.totalRounds ?? 10
 
@@ -244,10 +245,8 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
             return [...prev, newRound]
           })
 
-          // Animate reasoning
-          setAgent1Thought({ text: "", isComplete: false })
-          setAgent2Thought({ text: "", isComplete: false })
-          
+          // Animate reasoning - don't clear previous text until new text arrives
+          // This keeps previous answer visible while processing
           if (row.agent1_reasoning) {
             typewriter(row.agent1_reasoning, setAgent1Thought, typewriterRef1)
           }
@@ -341,34 +340,48 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
   }, [isOpen, gameId])
 
   // Reset state when modal opens with new game
+  // Only clear thoughts when modal freshly opens or switches to different game
   useEffect(() => {
     if (isOpen && initialData) {
+      const isNewOpen = !wasOpenRef.current
+      const isDifferentGame = prevGameIdRef.current !== gameId
+      const shouldResetThoughts = isNewOpen || isDifferentGame
+      
+      // Always update scores and rounds from latest data
       setRounds(initialData.rounds)
       setScoreA(initialData.scoreA)
       setScoreB(initialData.scoreB)
       setCurrentRound(initialData.rounds.length)
-      setIsComplete(false)
-      setWinner(null)
-      setAgent1Thought({ text: "", isComplete: false })
-      setAgent2Thought({ text: "", isComplete: false })
-      setAgent1Status(null)
-      setAgent2Status(null)
-      setAgent1RetryCount(null)
-      setAgent2RetryCount(null)
-      setLastError(null)
+      
+      // Only reset thoughts and show initial reasoning when modal opens fresh or game changes
+      if (shouldResetThoughts) {
+        setIsComplete(false)
+        setWinner(null)
+        setAgent1Thought({ text: "", isComplete: false })
+        setAgent2Thought({ text: "", isComplete: false })
+        setAgent1Status(null)
+        setAgent2Status(null)
+        setAgent1RetryCount(null)
+        setAgent2RetryCount(null)
+        setLastError(null)
 
-      // Show latest round's reasoning
-      if (initialData.rounds.length > 0) {
-        const lastRound = initialData.rounds[initialData.rounds.length - 1]
-        if (lastRound.reasoningA) {
-          typewriter(lastRound.reasoningA, setAgent1Thought, typewriterRef1)
-        }
-        if (lastRound.reasoningB) {
-          typewriter(lastRound.reasoningB, setAgent2Thought, typewriterRef2)
+        // Show latest round's reasoning
+        if (initialData.rounds.length > 0) {
+          const lastRound = initialData.rounds[initialData.rounds.length - 1]
+          if (lastRound.reasoningA) {
+            typewriter(lastRound.reasoningA, setAgent1Thought, typewriterRef1)
+          }
+          if (lastRound.reasoningB) {
+            typewriter(lastRound.reasoningB, setAgent2Thought, typewriterRef2)
+          }
         }
       }
+      
+      prevGameIdRef.current = gameId
     }
-  }, [isOpen, initialData, typewriter])
+    
+    wasOpenRef.current = isOpen
+  }, [isOpen, initialData, gameId, typewriter])
 
   const handleClose = () => {
     if (typewriterRef1.current) clearInterval(typewriterRef1.current)
@@ -490,15 +503,13 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
                     )}
                   </div>
                   
-                  {/* Status indicator for retries */}
-                  {agent1Status && agent1Status !== "done" && agent1Status !== "waiting" && !isComplete && (
+                  {/* Status indicator - only show for retries/errors (not normal processing) */}
+                  {agent1Status && (agent1Status.startsWith("retrying") || agent1Status === "error") && !isComplete && (
                     <div className={`px-3 sm:px-4 py-1.5 border-b border-white/10 ${
-                      agent1Status.startsWith("retrying") ? "bg-amber-500/10" : 
-                      agent1Status === "error" ? "bg-red-500/10" : "bg-blue-500/10"
+                      agent1Status === "error" ? "bg-red-500/10" : "bg-amber-500/10"
                     }`}>
                       <span className={`font-mono text-[10px] ${
-                        agent1Status.startsWith("retrying") ? "text-amber-400" :
-                        agent1Status === "error" ? "text-red-400" : "text-blue-400"
+                        agent1Status === "error" ? "text-red-400" : "text-amber-400"
                       }`}>
                         {formatAgentStatus(agent1Status, agent1RetryCount)}
                       </span>
@@ -508,7 +519,7 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                        {agent1Thought.text || (rounds.length === 0 ? "Waiting for first move..." : formatAgentStatus(agent1Status, agent1RetryCount))}
+                        {agent1Thought.text || latestRound?.reasoningA || (currentRound === 0 ? "Waiting for first move..." : "")}
                         {!agent1Thought.isComplete && !isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}
@@ -546,15 +557,13 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
                     )}
                   </div>
                   
-                  {/* Status indicator for retries */}
-                  {agent2Status && agent2Status !== "done" && agent2Status !== "waiting" && !isComplete && (
+                  {/* Status indicator - only show for retries/errors (not normal processing) */}
+                  {agent2Status && (agent2Status.startsWith("retrying") || agent2Status === "error") && !isComplete && (
                     <div className={`px-3 sm:px-4 py-1.5 border-b border-white/10 ${
-                      agent2Status.startsWith("retrying") ? "bg-amber-500/10" : 
-                      agent2Status === "error" ? "bg-red-500/10" : "bg-purple-500/10"
+                      agent2Status === "error" ? "bg-red-500/10" : "bg-amber-500/10"
                     }`}>
                       <span className={`font-mono text-[10px] ${
-                        agent2Status.startsWith("retrying") ? "text-amber-400" :
-                        agent2Status === "error" ? "text-red-400" : "text-purple-400"
+                        agent2Status === "error" ? "text-red-400" : "text-amber-400"
                       }`}>
                         {formatAgentStatus(agent2Status, agent2RetryCount)}
                       </span>
@@ -564,7 +573,7 @@ export function LiveGameModal({ isOpen, onClose, gameId, initialData }: LiveGame
                   <div className="flex-1 overflow-y-auto min-h-0">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
-                        {agent2Thought.text || (rounds.length === 0 ? "Waiting for first move..." : formatAgentStatus(agent2Status, agent2RetryCount))}
+                        {agent2Thought.text || latestRound?.reasoningB || (currentRound === 0 ? "Waiting for first move..." : "")}
                         {!agent2Thought.isComplete && !isComplete && (
                           <span className="inline-block w-2 h-4 bg-white/50 ml-1 animate-pulse" />
                         )}

@@ -16,9 +16,9 @@ type Decision = "cooperate" | "defect" | "error";
 // =============================================================================
 
 const RETRY_CONFIG = {
-  maxAttempts: 3,
+  maxAttempts: 2, // 1 retry (2 total attempts) - keeps games moving, model reliability is part of the test
   baseDelayMs: 2_000,
-  maxDelayMs: 30_000,
+  maxDelayMs: 10_000,
   timeoutMs: 90_000, // 90 seconds per attempt
 } as const;
 
@@ -140,7 +140,7 @@ function getSupabaseClient() {
 // Live Status Tracking - Updates game_live_status for real-time UI feedback
 // =============================================================================
 
-type AgentStatus = "waiting" | "processing" | "retrying_1" | "retrying_2" | "retrying_3" | "done" | "error";
+type AgentStatus = "waiting" | "processing" | "retrying_1" | "retrying_2" | "done" | "error";
 
 interface LiveStatusUpdate {
   gameId: string;
@@ -607,7 +607,7 @@ export const userGameTask = task({
             });
             return {
               decision: null as Decision | null,
-              reasoning: resultA.text.slice(0, 1000),
+              reasoning: resultA.text.slice(0, 4000),
               error: parseError,
               rawAction: parsedA.rawAction,
               rawResponse: resultA.text,
@@ -617,7 +617,7 @@ export const userGameTask = task({
           
           return {
             decision: parsedA.decision as Decision | null,
-            reasoning: resultA.text.slice(0, 1000),
+            reasoning: resultA.text.slice(0, 4000),
             rawAction: parsedA.rawAction,
             rawResponse: resultA.text,
             latencyMs: latencyA,
@@ -688,7 +688,7 @@ export const userGameTask = task({
             });
             return {
               decision: null as Decision | null,
-              reasoning: resultB.text.slice(0, 1000),
+              reasoning: resultB.text.slice(0, 4000),
               error: parseError,
               rawAction: parsedB.rawAction,
               rawResponse: resultB.text,
@@ -698,7 +698,7 @@ export const userGameTask = task({
           
           return {
             decision: parsedB.decision as Decision | null,
-            reasoning: resultB.text.slice(0, 1000),
+            reasoning: resultB.text.slice(0, 4000),
             rawAction: parsedB.rawAction,
             rawResponse: resultB.text,
             latencyMs: latencyB,

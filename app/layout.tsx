@@ -12,12 +12,12 @@ export const metadata: Metadata = {
   description:
     "A recreation of Robert Axelrod's 1984 experiment on Game Theory's classic thought experiment the Prisoner's Dilemma with LLMs.",
   generator: 'v0.app',
-  metadataBase: new URL('https://models-dilemma.vercel.app'),
+  metadataBase: new URL('https://modelsdilemma.ai'),
   openGraph: {
     title: "The Model's Dilemma",
     description: "A recreation of Robert Axelrod's 1984 experiment on the Prisoner's Dilemma with LLMs.",
     type: 'website',
-    url: 'https://models-dilemma.vercel.app',
+    url: 'https://modelsdilemma.ai',
     siteName: "The Model's Dilemma",
     images: [
       {

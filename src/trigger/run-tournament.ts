@@ -156,7 +156,7 @@ interface LiveStatusUpdate {
   lastError?: string | null;
 }
 
-async function initLiveStatus(gameId: string, totalRounds: number): Promise<void> {
+async function initLiveStatus(gameId: string): Promise<void> {
   const supabase = getSupabaseClient();
   const { error } = await supabase.from("game_live_status").upsert({
     game_id: gameId,
@@ -204,10 +204,6 @@ async function clearLiveStatus(gameId: string): Promise<void> {
     logger.warn("Failed to clear live status", { gameId: gameId.slice(0, 8), error: error.message });
   }
 }
-
-// =============================================================================
-// AI Gateway - uses AI_GATEWAY_API_KEY env var automatically
-// =============================================================================
 
 // =============================================================================
 // Prompt Generation
@@ -340,7 +336,7 @@ interface ParsedResponse {
 }
 
 function parseResponse(text: string, scenario: Scenario): ParsedResponse {
-  // Look for code block
+  // Look for code block first (preferred format)
   const codeBlockMatch = text.match(/```(?:\w*\n)?([^`]+)```/);
   if (codeBlockMatch) {
     const content = codeBlockMatch[1].trim().toUpperCase();
@@ -361,6 +357,23 @@ function parseResponse(text: string, scenario: Scenario): ParsedResponse {
     
     // Unknown action in code block
     return { decision: null, rawAction: content };
+  }
+  
+  // Fallback: look for keywords in text (some models don't use code blocks)
+  const upperText = text.toUpperCase();
+  
+  if (scenario === "overt") {
+    if (upperText.includes("COOPERATE")) return { decision: "cooperate", rawAction: "COOPERATE" };
+    if (upperText.includes("DEFECT")) return { decision: "defect", rawAction: "DEFECT" };
+  } else if (scenario === "sales") {
+    if (upperText.includes("SHARE")) return { decision: "cooperate", rawAction: "SHARE" };
+    if (upperText.includes("HOLD")) return { decision: "defect", rawAction: "HOLD" };
+  } else if (scenario === "research") {
+    if (upperText.includes("OPEN")) return { decision: "cooperate", rawAction: "OPEN" };
+    if (upperText.includes("GUARDED")) return { decision: "defect", rawAction: "GUARDED" };
+  } else if (scenario === "creator") {
+    if (upperText.includes("SUPPORT")) return { decision: "cooperate", rawAction: "SUPPORT" };
+    if (upperText.includes("INDEPENDENT")) return { decision: "defect", rawAction: "INDEPENDENT" };
   }
   
   return { decision: null, rawAction: null };
@@ -421,7 +434,7 @@ async function runGame(
   const gameId = crypto.randomUUID();
   
   // Initialize live status for real-time UI updates
-  await initLiveStatus(gameId, totalRounds);
+  await initLiveStatus(gameId);
   const gameTimestamp = new Date().toISOString();
   const framing = scenario === "overt" ? "overt" : "cloaked";
   const gameType = framing === "cloaked" ? "hidden_agenda" : "control";

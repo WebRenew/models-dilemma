@@ -46,18 +46,11 @@ export function AnimatedNumber({
     return `${prefix}${formatted}${suffix}`
   })
 
-  useEffect(() => {
-    if (isInView) {
-      motionValue.set(value)
-    }
-  }, [isInView, motionValue, value])
-
-  const handleMouseEnter = useCallback(() => {
+  const triggerGlitchEffect = useCallback((targetValue: number) => {
     if (isAnimating.current) return
     isAnimating.current = true
-    setIsHovering(true)
     
-    const finalText = `${prefix}${new Intl.NumberFormat("en-US", formatOptions).format(value)}${suffix}`
+    const finalText = `${prefix}${new Intl.NumberFormat("en-US", formatOptions).format(targetValue)}${suffix}`
     const chars = finalText.split("")
     const lockedIndices = new Set<number>()
     
@@ -85,7 +78,26 @@ export function AnimatedNumber({
         isAnimating.current = false
       },
     })
-  }, [value, prefix, suffix, formatOptions])
+  }, [prefix, suffix, formatOptions])
+
+  // Track previous value to detect changes
+  const prevValueRef = useRef(value)
+  
+  useEffect(() => {
+    if (isInView) {
+      motionValue.set(value)
+      
+      // Trigger glitch effect when value changes (not on initial load)
+      if (prevValueRef.current !== value && prevValueRef.current !== 0) {
+        triggerGlitchEffect(value)
+      }
+      prevValueRef.current = value
+    }
+  }, [isInView, motionValue, value, triggerGlitchEffect])
+
+  const handleMouseEnter = useCallback(() => {
+    triggerGlitchEffect(value)
+  }, [value, triggerGlitchEffect])
 
   return (
     <motion.span 
@@ -130,17 +142,11 @@ export function AnimatedPercent({
     return `${Math.round(latest)}%`
   })
 
-  useEffect(() => {
-    if (isInView) {
-      motionValue.set(percent)
-    }
-  }, [isInView, motionValue, percent])
-
-  const handleMouseEnter = useCallback(() => {
+  const triggerGlitchEffect = useCallback((targetPercent: number) => {
     if (isAnimating.current) return
     isAnimating.current = true
     
-    const finalText = `${percent}%`
+    const finalText = `${targetPercent}%`
     const chars = finalText.split("")
     const lockedIndices = new Set<number>()
     
@@ -167,7 +173,26 @@ export function AnimatedPercent({
         isAnimating.current = false
       },
     })
-  }, [percent])
+  }, [])
+
+  // Track previous value to detect changes
+  const prevPercentRef = useRef(percent)
+
+  useEffect(() => {
+    if (isInView) {
+      motionValue.set(percent)
+      
+      // Trigger glitch effect when percent changes (not on initial load)
+      if (prevPercentRef.current !== percent && prevPercentRef.current !== 0) {
+        triggerGlitchEffect(percent)
+      }
+      prevPercentRef.current = percent
+    }
+  }, [isInView, motionValue, percent, triggerGlitchEffect])
+
+  const handleMouseEnter = useCallback(() => {
+    triggerGlitchEffect(percent)
+  }, [percent, triggerGlitchEffect])
 
   return (
     <motion.span 

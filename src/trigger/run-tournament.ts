@@ -777,7 +777,7 @@ function pickModelsByGameCount(modelCounts: Map<string, number>, excludeModels: 
     .sort((a, b) => a.count - b.count);
   
   if (available.length < 2) {
-    // Fallback to random if not enough models available
+    // Fallback to random from ALL models (ignoring exclusions) if not enough available
     const shuffled = [...AI_MODELS].sort(() => Math.random() - 0.5);
     return [shuffled[0], shuffled[1]];
   }
@@ -786,6 +786,12 @@ function pickModelsByGameCount(modelCounts: Map<string, number>, excludeModels: 
   // Add some randomization among models with similar counts to avoid always same pairs
   const minCount = available[0].count;
   const lowGameModels = available.filter(m => m.count <= minCount + 5);
+  
+  // Ensure we have at least 2 models to pick from
+  if (lowGameModels.length < 2) {
+    // Just use the first 2 from available (already sorted by count)
+    return [available[0].model, available[1].model];
+  }
   
   // Shuffle among low-game models and pick 2
   const shuffled = lowGameModels.sort(() => Math.random() - 0.5);

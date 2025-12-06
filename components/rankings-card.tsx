@@ -157,10 +157,10 @@ export function RankingsCard({ rankings, onExport }: RankingsCardProps) {
                   </span>
                   <ScrambleText 
                     text={entry.modelId} 
-                    className="truncate flex-1"
+                    className="truncate flex-1 min-w-0"
                     delayMs={index * ROW_STAGGER_MS}
                   />
-                  <span className="flex gap-1.5 ml-2 shrink-0">
+                  <span className="flex gap-1 sm:gap-1.5 ml-1 sm:ml-2 shrink-0 text-[10px] sm:text-xs">
                     <span className="text-[#4ade80]">
                       <AnimatedNumber value={entry.wins} suffix="W" />
                     </span>

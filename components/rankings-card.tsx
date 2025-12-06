@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { ScrambleText } from "@/components/animations/ScrambleText"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { fetchModelDetailedStats, type ModelDetailedStats } from "@/lib/supabase/db"
+import { useMediaQuery } from "@/hooks/use-media-query"
 
 interface RankingEntry {
   rank: number
@@ -143,42 +145,66 @@ function ModelHoverContent({ modelId }: { modelId: string }) {
 }
 
 export function RankingsCard({ rankings, onExport }: RankingsCardProps) {
+  const isDesktop = useMediaQuery("(min-width: 640px)")
+
   return (
     <div className="border border-white/15 p-3 sm:p-5 flex flex-col justify-between w-full h-full">
       <div>
         <p className="font-mono text-[10px] sm:text-xs uppercase tracking-wider text-white/50 mb-2 sm:mb-3">Rankings</p>
         <div className="space-y-1 sm:space-y-1.5">
-          {rankings.slice(0, 10).map((entry, index) => (
-            <HoverCard key={entry.rank} openDelay={200} closeDelay={100}>
-              <HoverCardTrigger asChild>
-                <div className="font-mono text-xs sm:text-sm flex items-center text-white/80 cursor-pointer hover:bg-white/5 -mx-2 px-2 py-0.5 rounded transition-colors">
-                  <span className="w-4 sm:w-5 shrink-0 text-white/50">
-                    {entry.rank}
+          {rankings.slice(0, 10).map((entry, index) => {
+            const TriggerContent = (
+              <div className="font-mono text-xs sm:text-sm flex items-center text-white/80 cursor-pointer hover:bg-white/5 -mx-2 px-2 py-0.5 rounded transition-colors w-full">
+                <span className="w-4 sm:w-5 shrink-0 text-white/50">
+                  {entry.rank}
+                </span>
+                <ScrambleText
+                  text={entry.modelId}
+                  className="truncate flex-1 min-w-0"
+                  delayMs={index * ROW_STAGGER_MS}
+                />
+                <span className="flex gap-1 sm:gap-1.5 ml-1 sm:ml-2 shrink-0 text-[10px] sm:text-xs">
+                  <span className="text-[#4ade80]">
+                    <AnimatedNumber value={entry.wins} suffix="W" />
                   </span>
-                  <ScrambleText 
-                    text={entry.modelId} 
-                    className="truncate flex-1 min-w-0"
-                    delayMs={index * ROW_STAGGER_MS}
-                  />
-                  <span className="flex gap-1 sm:gap-1.5 ml-1 sm:ml-2 shrink-0 text-[10px] sm:text-xs">
-                    <span className="text-[#4ade80]">
-                      <AnimatedNumber value={entry.wins} suffix="W" />
-                    </span>
-                    <span className="text-[#f87171]">
-                      <AnimatedNumber value={entry.losses} suffix="L" />
-                    </span>
+                  <span className="text-[#f87171]">
+                    <AnimatedNumber value={entry.losses} suffix="L" />
                   </span>
-                </div>
-              </HoverCardTrigger>
-              <HoverCardContent 
-                side="right" 
-                align="start" 
-                className="bg-[#111] border-white/15 p-4 w-auto"
-              >
-                <ModelHoverContent modelId={entry.modelId} />
-              </HoverCardContent>
-            </HoverCard>
-          ))}
+                </span>
+              </div>
+            )
+
+            if (isDesktop) {
+              return (
+                <HoverCard key={entry.rank} openDelay={200} closeDelay={100}>
+                  <HoverCardTrigger asChild>
+                    {TriggerContent}
+                  </HoverCardTrigger>
+                  <HoverCardContent
+                    side="right"
+                    align="start"
+                    className="bg-[#111] border-white/15 p-4 w-auto"
+                  >
+                    <ModelHoverContent modelId={entry.modelId} />
+                  </HoverCardContent>
+                </HoverCard>
+              )
+            }
+
+            return (
+              <Sheet key={entry.rank}>
+                <SheetTrigger asChild>
+                  {TriggerContent}
+                </SheetTrigger>
+                <SheetContent side="bottom" className="bg-[#111] border-t border-white/15 p-6 h-[80vh]">
+                  <SheetHeader className="mb-4">
+                    <SheetTitle className="font-mono text-white">Model Statistics</SheetTitle>
+                  </SheetHeader>
+                  <ModelHoverContent modelId={entry.modelId} />
+                </SheetContent>
+              </Sheet>
+            )
+          })}
           {rankings.length === 0 && <p className="font-mono text-xs sm:text-sm text-white/50">No games yet</p>}
         </div>
       </div>

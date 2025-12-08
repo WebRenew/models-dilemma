@@ -334,7 +334,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 bg-black overflow-y-auto"
+          className="fixed inset-0 z-50 bg-black h-dvh overflow-hidden"
         >
           {/* Header */}
           <div className="sticky top-0 left-0 right-0 z-10 flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 bg-black border-b border-white/10">
@@ -377,7 +377,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
 
           {/* Setup Screen */}
           {gameState === "setup" && (
-            <div className="flex items-center justify-center min-h-[calc(100vh-60px)] px-3 sm:px-6 py-4">
+            <div className="flex items-center justify-center h-[calc(100dvh-60px)] px-3 sm:px-6 py-4 overflow-y-auto">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -473,9 +473,9 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
 
           {/* Playing / Complete Screen */}
           {(gameState === "playing" || gameState === "complete") && (
-            <div className="flex flex-col min-h-[calc(100vh-60px)] p-3 sm:p-6">
+            <div className="flex flex-col h-[calc(100dvh-60px)] p-3 sm:p-6 overflow-hidden">
               {/* Score Display */}
-              <div className="flex items-center justify-center gap-4 sm:gap-8 py-3 sm:py-6">
+              <div className="flex items-center justify-center gap-4 sm:gap-8 py-2 sm:py-4 shrink-0">
                 <div className="text-center">
                   <p className="font-mono text-[10px] sm:text-xs text-white/50 uppercase tracking-wider mb-1 truncate max-w-[80px] sm:max-w-none">
                     {getShortModelName(agent1Model)}
@@ -504,17 +504,17 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
               </div>
 
               {/* Responsive Layout: Stack on mobile, 2-col on tablet, 3-col on desktop */}
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 min-h-0">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 min-h-0 overflow-hidden">
                 {/* Left Column: System Prompt - Hidden on mobile, shown on lg */}
-                <div className="hidden lg:flex flex-col border border-white/10 bg-white/[0.02] min-h-0 max-h-[40vh] lg:max-h-none">
+                <div className="hidden lg:flex flex-col border border-white/10 bg-white/[0.02] min-h-0 overflow-hidden">
                   <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
                     <Info className="w-4 h-4 text-amber-400" />
                     <span className="font-mono text-[10px] sm:text-xs text-white/60 uppercase tracking-wider">
                       System Prompt
                     </span>
                   </div>
-                  
-                  <div className="flex-1 overflow-y-auto min-h-0">
+
+                  <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                     <div className="p-3 sm:p-4">
                       <pre className="font-mono text-[10px] sm:text-xs text-white/60 whitespace-pre-wrap leading-relaxed">
                         {systemPrompt || "Preparing prompt..."}
@@ -524,7 +524,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 </div>
 
                 {/* Agent 1 Response */}
-                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-[200px] sm:min-h-[250px] max-h-[35vh] md:max-h-none">
+                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-0 overflow-hidden">
                   <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
                     <Brain className="w-3 h-3 sm:w-4 sm:h-4 text-blue-400" />
                     <span className="font-mono text-[10px] sm:text-xs text-white/60 uppercase tracking-wider truncate">
@@ -534,8 +534,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto shrink-0" />
                     )}
                   </div>
-                  
-                  <div className="flex-1 overflow-y-auto min-h-0">
+
+                  <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
                         {agent1Thought.text || rounds[rounds.length - 1]?.agent1Reasoning || (currentRound === 0 ? "Waiting for first move..." : "")}
@@ -545,7 +545,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       </p>
                     </div>
                   </div>
-                  
+
                   {rounds.length > 0 && (
                     <div className="px-3 sm:px-4 py-2 sm:py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
                       <span className="font-mono text-[10px] sm:text-xs text-white/40">Decision:</span>
@@ -561,7 +561,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 </div>
 
                 {/* Agent 2 Response */}
-                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-[200px] sm:min-h-[250px] max-h-[35vh] md:max-h-none">
+                <div className="flex flex-col border border-white/10 bg-white/[0.02] min-h-0 overflow-hidden">
                   <div className="px-3 sm:px-4 py-2 sm:py-3 border-b border-white/10 flex items-center gap-2 shrink-0">
                     <Brain className="w-3 h-3 sm:w-4 sm:h-4 text-purple-400" />
                     <span className="font-mono text-[10px] sm:text-xs text-white/60 uppercase tracking-wider truncate">
@@ -571,8 +571,8 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       <Loader2 className="w-3 h-3 animate-spin text-white/40 ml-auto shrink-0" />
                     )}
                   </div>
-                  
-                  <div className="flex-1 overflow-y-auto min-h-0">
+
+                  <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                     <div className="p-3 sm:p-4">
                       <p className="font-mono text-xs sm:text-sm text-white/70 leading-relaxed whitespace-pre-wrap break-words">
                         {agent2Thought.text || rounds[rounds.length - 1]?.agent2Reasoning || (currentRound === 0 ? "Waiting for first move..." : "")}
@@ -582,7 +582,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                       </p>
                     </div>
                   </div>
-                  
+
                   {rounds.length > 0 && (
                     <div className="px-3 sm:px-4 py-2 sm:py-3 border-t border-white/10 flex items-center gap-2 shrink-0">
                       <span className="font-mono text-[10px] sm:text-xs text-white/40">Decision:</span>
@@ -599,7 +599,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
               </div>
 
               {/* Round History Strip - Scrollable on mobile */}
-              <div className="mt-3 sm:mt-4 w-full overflow-x-auto scrollbar-hide">
+              <div className="mt-3 sm:mt-4 w-full overflow-x-auto scrollbar-hide shrink-0">
                 <div className="flex items-center gap-1.5 sm:gap-2 justify-center min-w-max px-2">
                 {Array.from({ length: TOTAL_ROUNDS }).map((_, i) => {
                   const round = rounds[i]
@@ -649,7 +649,7 @@ export function PlayGameModal({ isOpen, onClose, onGameComplete }: PlayGameModal
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center mt-4 sm:mt-6"
+                  className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center mt-4 sm:mt-6 shrink-0"
                 >
                   <Button
                     onClick={resetGame}

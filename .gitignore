@@ -33,11 +33,10 @@ yarn-error.log*
 
 # Misc
 *.tsbuildinfo
-PROMPT_REFACTOR_PLAN.md
-TROUBLESHOOTING.md
-USER_GAME_REFACTOR.md
 
-# Data exports
-grok-defections.json
+# Local/internal docs
+.local/
 
+# Tool directories
 .trigger
+.claude

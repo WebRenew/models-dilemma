@@ -1,8 +1,7 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { motion } from "framer-motion"
-import { Button } from "@/components/ui/button"
 import { GameFeed } from "@/components/game-feed"
 import { StatsCard } from "@/components/stats-card"
 import { RankingsCard } from "@/components/rankings-card"
@@ -17,10 +16,11 @@ import { ScrambleText, ScrambleTextOnHover } from "@/components/animations/Scram
 import type { GameRecord } from "@/lib/game-logic"
 import { MODEL_COUNT, AI_MODELS } from "@/lib/models"
 import { fetchGameStats, fetchModelRankings, exportGameDataCSV, fetchStrategyStats } from "@/lib/supabase/db"
+import { createClient } from "@/lib/supabase/client"
+import Link from "next/link"
 
 // Get active model IDs for filtering rankings
 const ACTIVE_MODEL_IDS = AI_MODELS.map((m) => m.id)
-import Link from "next/link"
 
 export default function Home() {
   const [userGames, setUserGames] = useState<GameRecord[]>([])
@@ -29,6 +29,7 @@ export default function Home() {
   const [liveMatchCount, setLiveMatchCount] = useState(0)
   const [showBanner, setShowBanner] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const supabaseRef = useRef(createClient())
 
   const [dbStats, setDbStats] = useState({ totalGames: 0, controlRounds: 0, hiddenAgendaRounds: 0 })
   const [dbRankings, setDbRankings] = useState<
@@ -60,12 +61,31 @@ export default function Home() {
     setIsLoading(false)
   }, [])
 
+  // Load stats on mount and subscribe to Realtime updates
   useEffect(() => {
     loadStats(true) // Show loading on initial load
 
-    // Refresh stats every 5 seconds (silent refresh)
-    const interval = setInterval(() => loadStats(false), 5000)
-    return () => clearInterval(interval)
+    // Subscribe to game completions via Realtime - no polling needed
+    const channel = supabaseRef.current
+      .channel('stats-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'game_rounds',
+          filter: 'is_final_round=eq.true',
+        },
+        () => {
+          // Refresh stats when a game completes
+          loadStats(false)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabaseRef.current.removeChannel(channel)
+    }
   }, [loadStats])
 
   const gamesPlayed = dbStats.totalGames
@@ -90,7 +110,7 @@ export default function Home() {
   )
 
   const handleNewGame = useCallback(() => {
-    // Stats are refreshed via loadStats polling
+    // Stats are refreshed via Realtime subscription when games complete
   }, [])
 
   const exportDataset = useCallback(async () => {

@@ -43,5 +43,13 @@ export function createAdminClient() {
       autoRefreshToken: false,
       persistSession: false,
     },
+    db: {
+      schema: 'public',
+    },
+    global: {
+      headers: {
+        'x-connection-pool': 'enabled'
+      }
+    },
   })
 }

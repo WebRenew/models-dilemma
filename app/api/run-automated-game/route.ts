@@ -3,6 +3,13 @@ import { z } from "zod"
 import { createServerClient } from "@/lib/supabase/server"
 import { calculatePayoff, formatHistory, getShortModelName, type RoundResult, type GameRecord } from "@/lib/game-logic"
 import { AI_MODELS } from "@/lib/models"
+import {
+  getClientIP,
+  checkRateLimit,
+  isValidModelId,
+  rateLimitResponse,
+  invalidModelResponse,
+} from "@/lib/api-security"
 
 export const maxDuration = 60
 
@@ -28,6 +35,13 @@ function getRoundOutcome(
 }
 
 export async function POST(req: Request) {
+  // Security: Rate limiting
+  const clientIP = getClientIP(req)
+  const rateLimit = checkRateLimit(clientIP)
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetIn)
+  }
+
   const {
     agent1Model: customAgent1,
     agent2Model: customAgent2,
@@ -36,6 +50,14 @@ export async function POST(req: Request) {
 
   const agent1Model = customAgent1 || getRandomModel()
   const agent2Model = customAgent2 || getRandomModel()
+
+  // Security: Model allowlist validation
+  if (!isValidModelId(agent1Model)) {
+    return invalidModelResponse(agent1Model)
+  }
+  if (!isValidModelId(agent2Model)) {
+    return invalidModelResponse(agent2Model)
+  }
 
   const totalRounds = 10
   const rounds: RoundResult[] = []

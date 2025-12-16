@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { tasks } from "@trigger.dev/sdk/v3";
 import type { userGameTask } from "@/src/trigger/user-game";
+import {
+  getClientIP,
+  checkRateLimit,
+  isValidModelId,
+  rateLimitResponse,
+  invalidModelResponse,
+} from "@/lib/api-security";
 
 type Scenario = "overt" | "sales" | "research" | "creator";
 
@@ -12,6 +19,13 @@ interface StartUserGameRequest {
 }
 
 export async function POST(request: Request) {
+  // Security: Rate limiting
+  const clientIP = getClientIP(request)
+  const rateLimit = checkRateLimit(clientIP)
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetIn)
+  }
+
   try {
     const body: StartUserGameRequest = await request.json();
 
@@ -26,6 +40,14 @@ export async function POST(request: Request) {
         },
         { status: 400 }
       );
+    }
+
+    // Security: Model allowlist validation
+    if (!isValidModelId(agent1Model)) {
+      return invalidModelResponse(agent1Model)
+    }
+    if (!isValidModelId(agent2Model)) {
+      return invalidModelResponse(agent2Model)
     }
 
     // Validate scenario

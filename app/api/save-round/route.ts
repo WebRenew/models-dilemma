@@ -1,4 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/server"
+import {
+  getClientIP,
+  checkRateLimit,
+  isValidModelId,
+  rateLimitResponse,
+} from "@/lib/api-security"
 
 export const maxDuration = 10
 
@@ -38,8 +44,20 @@ function getRoundOutcome(
 }
 
 export async function POST(req: Request) {
+  // Security: Rate limiting
+  const clientIP = getClientIP(req)
+  const rateLimit = checkRateLimit(clientIP)
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetIn)
+  }
+
   try {
     const payload: SaveRoundPayload = await req.json()
+
+    // Security: Validate model IDs
+    if (!isValidModelId(payload.agent1Model) || !isValidModelId(payload.agent2Model)) {
+      return Response.json({ success: false, error: "Invalid model ID" }, { status: 400 })
+    }
     
     const supabase = createAdminClient()
     const gameType = payload.scenario === "overt" ? "control" : "hidden_agenda"
@@ -82,10 +100,6 @@ export async function POST(req: Request) {
     return Response.json({ success: false, error: "Failed to save round" }, { status: 500 })
   }
 }
-
-
-
-
 
 
 

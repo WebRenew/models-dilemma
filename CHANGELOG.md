@@ -1,5 +1,12 @@
 # Changelog
 
+## 16DEC25 1:00PM - Security Hardening
+- Added rate limiting (50 games/hour per IP) to all game API endpoints
+- Added model allowlist validation - only models from AI_MODELS registry accepted
+- Protected endpoints: run-match, run-automated-game, agent-decision, start-user-game, save-game, save-round
+- Added input validation to prevent data pollution attacks
+- Export Dataset now outputs gzip-compressed .csv.gz file (reduces ~10x file size)
+
 ## 16DEC25 12:00PM - Performance Improvements
 - Added database indexes for faster stats and ranking queries
 - Optimized RLS policies for improved query performance

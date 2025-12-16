@@ -121,13 +121,32 @@ export default function Home() {
       return
     }
 
-    const blob = new Blob([csv], { type: "text/csv" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "prisoners-dilemma-dataset.csv"
-    a.click()
-    URL.revokeObjectURL(url)
+    // Compress the CSV using gzip (native browser API)
+    const encoder = new TextEncoder()
+    const csvData = encoder.encode(csv)
+    
+    // Use CompressionStream if available (modern browsers)
+    if (typeof CompressionStream !== "undefined") {
+      const stream = new Blob([csvData]).stream()
+      const compressedStream = stream.pipeThrough(new CompressionStream("gzip"))
+      const compressedBlob = await new Response(compressedStream).blob()
+      
+      const url = URL.createObjectURL(compressedBlob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "prisoners-dilemma-dataset.csv.gz"
+      a.click()
+      URL.revokeObjectURL(url)
+    } else {
+      // Fallback: download uncompressed CSV for older browsers
+      const blob = new Blob([csv], { type: "text/csv" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "prisoners-dilemma-dataset.csv"
+      a.click()
+      URL.revokeObjectURL(url)
+    }
   }, [])
 
   const handleLiveMatchUpdate = useCallback((count: number) => {

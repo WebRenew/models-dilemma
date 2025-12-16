@@ -1,5 +1,11 @@
 import { createAdminClient } from "@/lib/supabase/server"
 import { type RoundResult } from "@/lib/game-logic"
+import {
+  getClientIP,
+  checkRateLimit,
+  isValidModelId,
+  rateLimitResponse,
+} from "@/lib/api-security"
 
 export const maxDuration = 30
 
@@ -31,6 +37,13 @@ function getRoundOutcome(
 }
 
 export async function POST(req: Request) {
+  // Security: Rate limiting
+  const clientIP = getClientIP(req)
+  const rateLimit = checkRateLimit(clientIP)
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetIn)
+  }
+
   try {
     const payload: SaveGamePayload = await req.json()
     
@@ -48,6 +61,16 @@ export async function POST(req: Request) {
 
     if (!gameId || !rounds || rounds.length === 0) {
       return Response.json({ success: false, error: "Invalid payload" }, { status: 400 })
+    }
+
+    // Security: Validate model IDs are from allowlist
+    if (!isValidModelId(agent1Model) || !isValidModelId(agent2Model)) {
+      return Response.json({ success: false, error: "Invalid model ID" }, { status: 400 })
+    }
+
+    // Security: Limit rounds to prevent abuse
+    if (rounds.length > 100) {
+      return Response.json({ success: false, error: "Too many rounds" }, { status: 400 })
     }
 
     const supabase = createAdminClient()

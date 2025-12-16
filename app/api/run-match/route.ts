@@ -9,6 +9,13 @@ import {
   type CloakedScenario,
 } from "@/lib/prompts"
 import { registerMatch, isMatchCancelled, cleanupMatch } from "@/lib/match-registry"
+import {
+  getClientIP,
+  checkRateLimit,
+  isValidModelId,
+  rateLimitResponse,
+  invalidModelResponse,
+} from "@/lib/api-security"
 
 export const maxDuration = 300 // 5 minutes for full match
 
@@ -134,6 +141,13 @@ async function getModelDecision(
 }
 
 export async function POST(req: Request) {
+  // Security: Rate limiting
+  const clientIP = getClientIP(req)
+  const rateLimit = checkRateLimit(clientIP)
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetIn)
+  }
+
   const body = await req.json()
   const {
     modelA,
@@ -148,6 +162,14 @@ export async function POST(req: Request) {
     saveToDb = true,
     streamRounds = true,
   } = body
+
+  // Security: Model allowlist validation
+  if (!isValidModelId(modelA)) {
+    return invalidModelResponse(modelA)
+  }
+  if (!isValidModelId(modelB)) {
+    return invalidModelResponse(modelB)
+  }
 
   const scenario: CloakedScenario = providedScenario || getRandomScenario()
 

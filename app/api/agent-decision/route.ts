@@ -1,5 +1,12 @@
 import { generateText } from "ai"
 import { gateway } from "@ai-sdk/gateway"
+import {
+  getClientIP,
+  checkRateLimit,
+  isValidModelId,
+  rateLimitResponse,
+  invalidModelResponse,
+} from "@/lib/api-security"
 
 export const maxDuration = 60
 
@@ -145,11 +152,23 @@ function parseResponse(text: string, scenario: Scenario): { decision: "cooperate
 }
 
 export async function POST(req: Request) {
+  // Security: Rate limiting
+  const clientIP = getClientIP(req)
+  const rateLimit = checkRateLimit(clientIP)
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.resetIn)
+  }
+
   try {
     const { history, round, totalRounds, model, scenario, myScore, oppScore } = await req.json()
 
     const modelToUse = model || "openai/gpt-4o-mini"
     const scenarioToUse: Scenario = scenario || "overt"
+
+    // Security: Model allowlist validation
+    if (!isValidModelId(modelToUse)) {
+      return invalidModelResponse(modelToUse)
+    }
     
     console.log("[agent-decision] Request:", { round, model: modelToUse, scenario: scenarioToUse })
 
